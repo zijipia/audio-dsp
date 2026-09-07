@@ -10,12 +10,18 @@ export interface DSPOptions {
 
 export interface AudioDSP {
   process(input: Buffer): Buffer;
+  setVolume(volume: number): void;
+  setMute(muted: boolean): void;
+  setPan(pan: number): void;
   reset(): void;
   destroy(): void;
 }
 
 interface NativeDSP {
   process(input: Buffer): Buffer;
+  setVolume(volume: number): void;
+  setMute(muted: boolean): void;
+  setPan(pan: number): void;
   reset(): void;
   destroy(): void;
 }
@@ -53,6 +59,26 @@ export function createDSP(options: DSPOptions): AudioDSP {
       if (destroyed) throw new Error("AudioDSP instance has been destroyed");
       if (!Buffer.isBuffer(input)) throw new TypeError("process() requires a Buffer");
       return native.process(input);
+    },
+    setVolume(volume: number): void {
+      if (destroyed) throw new Error("AudioDSP instance has been destroyed");
+      if (!Number.isFinite(volume) || volume < 0 || volume > 4) {
+        throw new RangeError("volume must be a finite number from 0 to 4");
+      }
+      native.setVolume(volume);
+    },
+    setMute(muted: boolean): void {
+      if (destroyed) throw new Error("AudioDSP instance has been destroyed");
+      if (typeof muted !== "boolean") throw new TypeError("muted must be a boolean");
+      native.setMute(muted);
+    },
+    setPan(pan: number): void {
+      if (destroyed) throw new Error("AudioDSP instance has been destroyed");
+      if (!Number.isFinite(pan) || pan < -1 || pan > 1) {
+        throw new RangeError("pan must be a finite number from -1 to 1");
+      }
+      if (options.channels < 2) throw new Error("pan requires at least 2 channels");
+      native.setPan(pan);
     },
     reset(): void {
       if (destroyed) throw new Error("AudioDSP instance has been destroyed");
