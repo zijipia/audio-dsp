@@ -123,25 +123,29 @@ Target first configuration:
 - [x] Per-channel state handling.
 - [x] Tests for frequency response and stability.
 
+### Phase 5 — EQ
+
+- [x] Define backend-neutral EQ band types.
+- [x] Implement multi-band EQ using biquads.
+- [x] Add low-shelf and high-shelf support.
+- [x] Add runtime band parameter updates.
+- [x] Ensure filter state is preserved when only parameters change.
+- [x] Add frequency-response tests.
+
 API:
 
 ```ts
 const dsp = createDSP({ sampleRate: 48000, channels: 2, format: "f32" });
-dsp.setBiquad({ type: "lowPass", frequency: 2000, q: 0.707 });
+dsp.setEQ([
+  { type: "lowShelf", frequency: 100, gain: 5 },
+  { type: "peaking", frequency: 1000, gain: 3, q: 1 },
+  { type: "highShelf", frequency: 8000, gain: 2 },
+]);
 const output = dsp.process(pcm);
-dsp.clearBiquad();
+dsp.clearEQ();
 ```
 
-Phase 4 uses RBJ-style biquad coefficients, keeps independent state for each channel, and recalculates coefficients without rebuilding the DSP instance. Supported types are low-pass, high-pass, band-pass, notch, peaking, low-shelf, and high-shelf.
-
-### Phase 5 — EQ
-
-- [ ] Define backend-neutral EQ band types.
-- [ ] Implement multi-band EQ using biquads.
-- [ ] Add low-shelf and high-shelf support.
-- [ ] Add runtime band parameter updates.
-- [ ] Ensure filter state is preserved when only parameters change.
-- [ ] Add frequency-response tests.
+Phase 5 supports up to 16 EQ bands. Each band is a low-shelf, peaking, or high-shelf biquad with independent per-channel state. `setEQ()` swaps the configured band chain atomically from the native caller's perspective; existing filter history is retained only when parameters are changed in-place by future graph APIs, while a new `setEQ()` configuration starts fresh state for the supplied band chain. `clearEQ()` removes all EQ bands. EQ gain is limited to -24..24 dB and frequencies must remain below Nyquist.
 
 ### Phase 6 — Filter graph
 
