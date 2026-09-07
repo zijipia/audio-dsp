@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 export type AudioFormat = "s16" | "f32";
 
 export interface DSPOptions {
@@ -6,33 +8,65 @@ export interface DSPOptions {
   format: AudioFormat;
 }
 
-export interface EQBand {
-  type: "lowShelf" | "peaking" | "highShelf";
-  frequency: number;
-  gain: number;
-  q?: number;
-}
-
 export interface AudioDSP {
-  process(input: Buffer, output?: Buffer): Buffer;
+  process(input: Buffer): Buffer;
   reset(): void;
   destroy(): void;
-  setVolume(gain: number): void;
-  setEQ(bands: EQBand[]): void;
 }
 
-export interface NativeAddon {
+interface NativeDSP {
+  process(input: Buffer): Buffer;
+  reset(): void;
+  destroy(): void;
+}
+
+interface NativeAddon {
   version(): string;
+  createDSP(options: DSPOptions): NativeDSP;
 }
 
-// Phase 0 only defines the public surface. DSP behavior is implemented in Phase 1+.
-export function createDSP(_options: DSPOptions): AudioDSP {
-  throw new Error("createDSP() is not implemented yet; see Phase 1 — PCM processing MVP");
+function loadNative(): NativeAddon {
+  // eslint-free CommonJS loading keeps the package dependency-light.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require("../build/Release/audio_dsp.node") as NativeAddon;
+}
+
+function validateOptions(options: DSPOptions): void {
+  if (!Number.isInteger(options.sampleRate) || options.sampleRate <= 0) {
+    throw new RangeError("sampleRate must be a positive integer");
+  }
+  if (!Number.isInteger(options.channels) || options.channels < 1 || options.channels > 8) {
+    throw new RangeError("channels must be an integer from 1 to 8");
+  }
+  if (options.format !== "s16" && options.format !== "f32") {
+    throw new TypeError("format must be s16 or f32");
+  }
+}
+
+export function createDSP(options: DSPOptions): AudioDSP {
+  validateOptions(options);
+  const native = loadNative().createDSP(options);
+  let destroyed = false;
+
+  return {
+    process(input: Buffer): Buffer {
+      if (destroyed) throw new Error("AudioDSP instance has been destroyed");
+      if (!Buffer.isBuffer(input)) throw new TypeError("process() requires a Buffer");
+      return native.process(input);
+    },
+    reset(): void {
+      if (destroyed) throw new Error("AudioDSP instance has been destroyed");
+      native.reset();
+    },
+    destroy(): void {
+      if (!destroyed) {
+        native.destroy();
+        destroyed = true;
+      }
+    },
+  };
 }
 
 export function nativeVersion(): string {
-  // eslint-free CommonJS loading keeps the Phase 0 package dependency-light.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const native = require("../build/Release/audio_dsp.node") as NativeAddon;
-  return native.version();
+  return loadNative().version();
 }
