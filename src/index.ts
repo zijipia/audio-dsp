@@ -3,57 +3,20 @@ import { Buffer } from "node:buffer";
 export type AudioFormat = "s16" | "f32";
 export type BiquadType = "lowPass" | "highPass" | "bandPass" | "notch" | "peaking" | "lowShelf" | "highShelf";
 export type EQBandType = "lowShelf" | "peaking" | "highShelf";
-
-export interface BiquadConfig {
-  type: BiquadType;
-  frequency: number;
-  q?: number;
-  gain?: number;
-}
-
-export interface EQBand {
-  type: EQBandType;
-  frequency: number;
-  q?: number;
-  gain?: number;
-}
-
-export interface DSPOptions {
-  sampleRate: number;
-  channels: number;
-  format: AudioFormat;
-}
-
-export interface AudioDSP {
-  process(input: Buffer): Buffer;
-  setVolume(volume: number): void;
-  setMute(muted: boolean): void;
-  setPan(pan: number): void;
-  setBiquad(config: BiquadConfig): void;
-  clearBiquad(): void;
-  setEQ(bands: EQBand[]): void;
-  clearEQ(): void;
-  reset(): void;
-  destroy(): void;
-}
-
-interface NativeDSP {
-  process(input: Buffer): Buffer;
-  setVolume(volume: number): void;
-  setMute(muted: boolean): void;
-  setPan(pan: number): void;
-  setBiquad(config: BiquadConfig): void;
-  clearBiquad(): void;
-  setEQ(bands: EQBand[]): void;
-  clearEQ(): void;
-  reset(): void;
-  destroy(): void;
-}
-
-interface NativeAddon { version(): string; createDSP(options: DSPOptions): NativeDSP; }
-function loadNative(): NativeAddon { return require("../build/Release/audio_dsp.node") as NativeAddon; }
-function validateOptions(o: DSPOptions): void { if(!Number.isInteger(o.sampleRate)||o.sampleRate<=0)throw new RangeError("sampleRate must be a positive integer"); if(!Number.isInteger(o.channels)||o.channels<1||o.channels>8)throw new RangeError("channels must be an integer from 1 to 8"); if(o.format!=="s16"&&o.format!=="f32")throw new TypeError("format must be s16 or f32"); }
-function validateBiquad(c: BiquadConfig,sr:number):void{const t:BiquadType[]=["lowPass","highPass","bandPass","notch","peaking","lowShelf","highShelf"];if(!c||typeof c!=="object"||!t.includes(c.type))throw new TypeError("invalid biquad type");if(!Number.isFinite(c.frequency)||c.frequency<=0||c.frequency>=sr/2)throw new RangeError("frequency must be between 0 and Nyquist");if(c.q!==undefined&&(!Number.isFinite(c.q)||c.q<=0))throw new RangeError("q must be a positive finite number");if(c.gain!==undefined&&(!Number.isFinite(c.gain)||c.gain<-24||c.gain>24))throw new RangeError("gain must be a finite number from -24 to 24 dB");}
-function validateEQBand(b:EQBand,sr:number):void{if(!b||typeof b!=="object")throw new TypeError("EQ band must be an object");if(b.type!=="lowShelf"&&b.type!=="peaking"&&b.type!=="highShelf")throw new TypeError("invalid EQ band type");if(!Number.isFinite(b.frequency)||b.frequency<=0||b.frequency>=sr/2)throw new RangeError("EQ frequency must be between 0 and Nyquist");if(b.q!==undefined&&(!Number.isFinite(b.q)||b.q<=0))throw new RangeError("EQ q must be a positive finite number");if(b.gain===undefined||!Number.isFinite(b.gain)||b.gain<-24||b.gain>24)throw new RangeError("EQ gain must be a finite number from -24 to 24 dB");}
-export function createDSP(options:DSPOptions):AudioDSP{validateOptions(options);const n=loadNative().createDSP(options);let destroyed=false;const guard=()=>{if(destroyed)throw new Error("AudioDSP instance has been destroyed")};return{process(i:Buffer){guard();if(!Buffer.isBuffer(i))throw new TypeError("process() requires a Buffer");return n.process(i)},setVolume(v:number){guard();if(!Number.isFinite(v)||v<0||v>4)throw new RangeError("volume must be a finite number from 0 to 4");n.setVolume(v)},setMute(v:boolean){guard();if(typeof v!=="boolean")throw new TypeError("muted must be a boolean");n.setMute(v)},setPan(v:number){guard();if(!Number.isFinite(v)||v<-1||v>1)throw new RangeError("pan must be a finite number from -1 to 1");if(options.channels<2)throw new Error("pan requires at least 2 channels");n.setPan(v)},setBiquad(c:BiquadConfig){guard();validateBiquad(c,options.sampleRate);n.setBiquad(c)},clearBiquad(){guard();n.clearBiquad()},setEQ(bands:EQBand[]){guard();if(!Array.isArray(bands)||bands.length>16)throw new RangeError("EQ bands must be an array with at most 16 bands");bands.forEach(b=>validateEQBand(b,options.sampleRate));n.setEQ(bands)},clearEQ(){guard();n.clearEQ()},reset(){guard();n.reset()},destroy(){if(!destroyed){n.destroy();destroyed=true}}}}
-export function nativeVersion():string{return loadNative().version();}
+export type FilterType = "biquad" | "eq";
+export interface BiquadConfig { type: BiquadType; frequency: number; q?: number; gain?: number; }
+export interface EQBand { type: EQBandType; frequency: number; q?: number; gain?: number; }
+export interface FilterNode { id: string; type: FilterType; }
+export interface DSPOptions { sampleRate: number; channels: number; format: AudioFormat; }
+export interface AudioDSP { process(input: Buffer): Buffer; setVolume(v:number):void; setMute(v:boolean):void; setPan(v:number):void; setBiquad(c:BiquadConfig):void; clearBiquad():void; setEQ(b:EQBand[]):void; clearEQ():void; addBiquad(id:string,c:BiquadConfig):void; addEQ(id:string,b:EQBand[]):void; removeFilter(id:string):void; setFilterOrder(ids:string[]):void; updateBiquad(id:string,c:BiquadConfig):void; updateEQ(id:string,b:EQBand[]):void; reset():void; destroy():void; }
+interface NativeDSP { process(i:Buffer):Buffer; setVolume(v:number):void; setMute(v:boolean):void; setPan(v:number):void; setBiquad(c:BiquadConfig):void; clearBiquad():void; setEQ(b:EQBand[]):void; clearEQ():void; addBiquad(id:string,c:BiquadConfig):void; addEQ(id:string,b:EQBand[]):void; removeFilter(id:string):void; setFilterOrder(ids:string[]):void; updateBiquad(id:string,c:BiquadConfig):void; updateEQ(id:string,b:EQBand[]):void; reset():void; destroy():void; }
+interface NativeAddon { version():string; createDSP(o:DSPOptions):NativeDSP; }
+function loadNative():NativeAddon{return require("../build/Release/audio_dsp.node") as NativeAddon;}
+function validateOptions(o:DSPOptions){if(!Number.isInteger(o.sampleRate)||o.sampleRate<=0)throw new RangeError("sampleRate must be a positive integer");if(!Number.isInteger(o.channels)||o.channels<1||o.channels>8)throw new RangeError("channels must be an integer from 1 to 8");if(o.format!=="s16"&&o.format!=="f32")throw new TypeError("format must be s16 or f32");}
+const BT:BiquadType[]=["lowPass","highPass","bandPass","notch","peaking","lowShelf","highShelf"];
+function validateBiquad(c:BiquadConfig,sr:number){if(!c||typeof c!=="object"||!BT.includes(c.type))throw new TypeError("invalid biquad type");if(!Number.isFinite(c.frequency)||c.frequency<=0||c.frequency>=sr/2)throw new RangeError("frequency must be between 0 and Nyquist");if(c.q!==undefined&&(!Number.isFinite(c.q)||c.q<=0))throw new RangeError("q must be a positive finite number");if(c.gain!==undefined&&(!Number.isFinite(c.gain)||c.gain<-24||c.gain>24))throw new RangeError("gain must be a finite number from -24 to 24 dB");}
+function validateEQBand(b:EQBand,sr:number){if(!b||typeof b!=="object"||!["lowShelf","peaking","highShelf"].includes(b.type))throw new TypeError("invalid EQ band type");if(!Number.isFinite(b.frequency)||b.frequency<=0||b.frequency>=sr/2)throw new RangeError("EQ frequency must be between 0 and Nyquist");if(b.q!==undefined&&(!Number.isFinite(b.q)||b.q<=0))throw new RangeError("EQ q must be positive");if(b.gain===undefined||!Number.isFinite(b.gain)||b.gain<-24||b.gain>24)throw new RangeError("EQ gain must be between -24 and 24 dB");}
+function validateEQ(b:EQBand[],sr:number){if(!Array.isArray(b)||b.length>16)throw new RangeError("EQ bands must be an array with at most 16 bands");b.forEach(x=>validateEQBand(x,sr));}
+function validId(id:string){if(typeof id!=="string"||!id.trim())throw new TypeError("filter id must be a non-empty string");}
+export function createDSP(options:DSPOptions):AudioDSP{validateOptions(options);const n=loadNative().createDSP(options);let dead=false;const ids=new Set<string>();const guard=()=>{if(dead)throw new Error("AudioDSP instance has been destroyed")};return{process(i){guard();if(!Buffer.isBuffer(i))throw new TypeError("process() requires a Buffer");return n.process(i)},setVolume(v){guard();if(!Number.isFinite(v)||v<0||v>4)throw new RangeError("volume must be a finite number from 0 to 4");n.setVolume(v)},setMute(v){guard();if(typeof v!=="boolean")throw new TypeError("muted must be a boolean");n.setMute(v)},setPan(v){guard();if(!Number.isFinite(v)||v<-1||v>1)throw new RangeError("pan must be a finite number from -1 to 1");if(options.channels<2)throw new Error("pan requires at least 2 channels");n.setPan(v)},setBiquad(c){guard();validateBiquad(c,options.sampleRate);n.setBiquad(c)},clearBiquad(){guard();n.clearBiquad()},setEQ(b){guard();validateEQ(b,options.sampleRate);n.setEQ(b)},clearEQ(){guard();n.clearEQ()},addBiquad(id,c){guard();validId(id);if(ids.has(id))throw new Error(`filter id already exists: ${id}`);validateBiquad(c,options.sampleRate);n.addBiquad(id,c);ids.add(id)},addEQ(id,b){guard();validId(id);if(ids.has(id))throw new Error(`filter id already exists: ${id}`);validateEQ(b,options.sampleRate);n.addEQ(id,b);ids.add(id)},removeFilter(id){guard();validId(id);if(!ids.has(id))throw new Error(`unknown filter id: ${id}`);n.removeFilter(id);ids.delete(id)},setFilterOrder(order){guard();if(!Array.isArray(order)||order.some(x=>typeof x!=="string"))throw new TypeError("filter order must be an array of ids");if(order.length!==ids.size||new Set(order).size!==order.length||order.some(x=>!ids.has(x)))throw new RangeError("filter order must contain every filter id exactly once");n.setFilterOrder(order)},updateBiquad(id,c){guard();validId(id);if(!ids.has(id))throw new Error(`unknown filter id: ${id}`);validateBiquad(c,options.sampleRate);n.updateBiquad(id,c)},updateEQ(id,b){guard();validId(id);if(!ids.has(id))throw new Error(`unknown filter id: ${id}`);validateEQ(b,options.sampleRate);n.updateEQ(id,b)},reset(){guard();n.reset()},destroy(){if(!dead){n.destroy();dead=true;ids.clear()}}}}
+export function nativeVersion(){return loadNative().version();}
