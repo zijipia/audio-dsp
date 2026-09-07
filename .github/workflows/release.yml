@@ -26,20 +26,19 @@ jobs:
 
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.release.tag_name }}
           submodules: recursive
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
@@ -63,19 +62,13 @@ jobs:
 
       - name: Upload build output
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-${{ matrix.artifact }}
           path: build/
           if-no-files-found: warn
 
       - name: Upload release asset
-        uses: actions/upload-release-asset@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ github.event.release.id }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: audio-dsp-${{ github.event.release.tag_name }}-${{ matrix.artifact }}.tgz
-          asset_name: audio-dsp-${{ github.event.release.tag_name }}-${{ matrix.artifact }}.tgz
-          asset_content_type: application/gzip
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "audio-dsp-${{ github.event.release.tag_name }}-${{ matrix.artifact }}.tgz" --clobber
