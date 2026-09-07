@@ -14,6 +14,7 @@ Status: **implemented on `main`**
 - `reset()` clears EQ configuration and state.
 - EQ runs after Phase 3 volume/mute/pan and the optional single Phase 4 biquad.
 - No audio device I/O is introduced.
+- Frequency-response and lifecycle tests.
 
 ## API
 
@@ -36,7 +37,7 @@ dsp.clearEQ();
 
 ## Runtime semantics
 
-`setEQ()` validates and builds the complete replacement band chain before swapping it into the native context, so invalid configurations do not partially mutate the existing chain. A newly supplied chain starts with zeroed delay-line state. The Phase 6 filter graph will provide stable IDs and true in-place parameter updates while preserving state for individual bands.
+`setEQ()` validates and builds the complete replacement band chain before swapping it into the native context, so invalid configurations do not partially mutate the existing chain. When an existing band at the same position has the same filter type, its per-channel delay-line state is retained while coefficients are recalculated. This preserves state when only frequency, Q, or gain parameters change. Adding, removing, or changing the type of a band starts fresh state for that band.
 
 ## Version
 
