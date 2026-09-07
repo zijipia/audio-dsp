@@ -37,6 +37,9 @@ Source / Decoder
 |                   |
 | miniaudio / DSP   |
 | Volume            |
+| Mute              |
+| Pan / Balance     |
+| Clipping          |
 | Biquad            |
 | EQ                |
 | Limiter           |
@@ -99,14 +102,14 @@ Target first configuration:
 
 ### Phase 3 — Basic filters
 
-- [ ] Volume / gain.
-- [ ] Mute.
-- [ ] Pan/balance if required.
-- [ ] Basic clipping protection.
-- [ ] Parameter validation and safe ranges.
-- [ ] Runtime parameter updates without rebuilding the DSP instance.
+- [x] Volume / gain.
+- [x] Mute.
+- [x] Pan/balance for stereo processing.
+- [x] Basic clipping protection.
+- [x] Parameter validation and safe ranges.
+- [x] Runtime parameter updates without rebuilding the DSP instance.
 
-Example API direction:
+API:
 
 ```ts
 const dsp = createDSP({
@@ -116,8 +119,12 @@ const dsp = createDSP({
 });
 
 dsp.setVolume(0.8);
+dsp.setMute(false);
+dsp.setPan(-0.25);
 const output = dsp.process(pcm);
 ```
+
+Phase 3 uses linear stereo balance (`-1` left, `0` center, `+1` right). Volume accepts `0..4`; mute is boolean. Output is clipped to the valid range for the selected PCM format.
 
 ### Phase 4 — Biquad filters
 
