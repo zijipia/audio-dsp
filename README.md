@@ -109,36 +109,30 @@ Target first configuration:
 - [x] Parameter validation and safe ranges.
 - [x] Runtime parameter updates without rebuilding the DSP instance.
 
+### Phase 4 — Biquad filters
+
+- [x] Implement biquad filter abstraction.
+- [x] Low-pass.
+- [x] High-pass.
+- [x] Band-pass.
+- [x] Notch.
+- [x] Peaking EQ.
+- [x] Low shelf.
+- [x] High shelf.
+- [x] Stable coefficient recalculation.
+- [x] Per-channel state handling.
+- [x] Tests for frequency response and stability.
+
 API:
 
 ```ts
-const dsp = createDSP({
-  sampleRate: 48000,
-  channels: 2,
-  format: "s16",
-});
-
-dsp.setVolume(0.8);
-dsp.setMute(false);
-dsp.setPan(-0.25);
+const dsp = createDSP({ sampleRate: 48000, channels: 2, format: "f32" });
+dsp.setBiquad({ type: "lowPass", frequency: 2000, q: 0.707 });
 const output = dsp.process(pcm);
+dsp.clearBiquad();
 ```
 
-Phase 3 uses linear stereo balance (`-1` left, `0` center, `+1` right). Volume accepts `0..4`; mute is boolean. Output is clipped to the valid range for the selected PCM format.
-
-### Phase 4 — Biquad filters
-
-- [ ] Implement biquad filter abstraction.
-- [ ] Low-pass.
-- [ ] High-pass.
-- [ ] Band-pass.
-- [ ] Notch.
-- [ ] Peaking EQ.
-- [ ] Low shelf.
-- [ ] High shelf.
-- [ ] Stable coefficient recalculation.
-- [ ] Per-channel state handling.
-- [ ] Tests for frequency response and stability.
+Phase 4 uses RBJ-style biquad coefficients, keeps independent state for each channel, and recalculates coefficients without rebuilding the DSP instance. Supported types are low-pass, high-pass, band-pass, notch, peaking, low-shelf, and high-shelf.
 
 ### Phase 5 — EQ
 
@@ -148,16 +142,6 @@ Phase 3 uses linear stereo balance (`-1` left, `0` center, `+1` right). Volume a
 - [ ] Add runtime band parameter updates.
 - [ ] Ensure filter state is preserved when only parameters change.
 - [ ] Add frequency-response tests.
-
-Example direction:
-
-```ts
-dsp.setEQ([
-  { type: "lowShelf", frequency: 100, gain: 5 },
-  { type: "peaking", frequency: 1000, gain: 3, q: 1 },
-  { type: "highShelf", frequency: 8000, gain: 2 },
-]);
-```
 
 ### Phase 6 — Filter graph
 
