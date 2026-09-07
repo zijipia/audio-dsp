@@ -1,0 +1,74 @@
+name: Release
+
+on:
+release:
+types:
+- published
+
+permissions:
+contents: write
+
+jobs:
+build:
+name: Build ${{ matrix.os }}
+runs-on: ${{ matrix.os }}
+
+```
+strategy:
+  fail-fast: false
+  matrix:
+    include:
+      - os: ubuntu-latest
+        artifact: linux-x64
+      - os: macos-latest
+        artifact: macos-x64
+      - os: windows-latest
+        artifact: windows-x64
+
+steps:
+  - name: Checkout release tag
+    uses: actions/checkout@v4
+    with:
+      ref: ${{ github.event.release.tag_name }}
+      submodules: recursive
+      fetch-depth: 0
+
+  - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: 22
+      cache: npm
+
+  - name: Setup Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.x"
+
+  - name: Install dependencies
+    run: npm install
+
+  - name: Run tests
+    run: npm test
+
+  - name: Build native addon
+    run: npm run build
+
+  - name: Create npm package
+    run: npm pack
+
+  - name: Rename package
+    shell: bash
+    run: |
+      PACKAGE=$(ls *.tgz | head -n 1)
+      mv "$PACKAGE" "audio-dsp-${{ github.event.release.tag_name }}-${{ matrix.artifact }}.tgz"
+
+  - name: Upload release asset
+    uses: actions/upload-release-asset@v1
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_ID: ${{ github.event.release.id }}
+    with:
+      upload_url: ${{ github.event.release.upload_url }}
+      asset_path: audio-dsp-${{ github.event.release.tag_name }}-${{ matrix.artifact }}.tgz
+      asset_name: audio-dsp-${{ github.event.release.tag_name }}-${{ matrix.artifact }}.tgz
+      asset_content_type: application/gzip
