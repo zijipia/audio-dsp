@@ -42,6 +42,7 @@ Source / Decoder
 | Clipping          |
 | Biquad            |
 | EQ                |
+| Filter Graph      |
 | Limiter           |
 | Custom filters    |
 +-------------------+
@@ -61,7 +62,6 @@ The package should operate on raw PCM. Decoder and encoder responsibilities rema
 ## Roadmap / TODO
 
 ### Phase 0 — Project foundation
-
 - [x] Define package name, public API, and supported Node.js versions.
 - [x] Set up TypeScript source and native C/C++ build structure.
 - [x] Set up N-API bindings.
@@ -71,7 +71,6 @@ The package should operate on raw PCM. Decoder and encoder responsibilities rema
 - [x] Pin and document the miniaudio version used by the project.
 
 ### Phase 1 — PCM processing MVP
-
 - [x] Define `AudioFormat` (`s16`, `f32`).
 - [x] Define sample rate and channel configuration.
 - [x] Implement `createDSP()`.
@@ -83,15 +82,7 @@ The package should operate on raw PCM. Decoder and encoder responsibilities rema
 - [x] Add silence, sine-wave, impulse, and random-PCM tests.
 - [x] Verify repeated processing does not leak resources.
 
-Target first configuration:
-
-- Sample rate: 48,000 Hz
-- Channels: 2
-- Block size: 480 or 960 frames
-- Format: `s16` and/or `f32`
-
 ### Phase 2 — Native miniaudio integration
-
 - [x] Integrate miniaudio as a vendored/native dependency.
 - [x] Use miniaudio for PCM/DSP functionality only.
 - [x] Avoid `ma_device` and hardware audio I/O.
@@ -101,7 +92,6 @@ Target first configuration:
 - [x] Add native error handling and status propagation.
 
 ### Phase 3 — Basic filters
-
 - [x] Volume / gain.
 - [x] Mute.
 - [x] Pan/balance for stereo processing.
@@ -110,7 +100,6 @@ Target first configuration:
 - [x] Runtime parameter updates without rebuilding the DSP instance.
 
 ### Phase 4 — Biquad filters
-
 - [x] Implement biquad filter abstraction.
 - [x] Low-pass.
 - [x] High-pass.
@@ -124,7 +113,6 @@ Target first configuration:
 - [x] Tests for frequency response and stability.
 
 ### Phase 5 — EQ
-
 - [x] Define backend-neutral EQ band types.
 - [x] Implement multi-band EQ using biquads.
 - [x] Add low-shelf and high-shelf support.
@@ -132,43 +120,35 @@ Target first configuration:
 - [x] Ensure filter state is preserved when only parameters change.
 - [x] Add frequency-response tests.
 
+### Phase 6 — Filter graph
+- [x] Introduce a native filter graph abstraction.
+- [x] Add/remove filters without restarting the processing pipeline.
+- [x] Define stable filter IDs.
+- [x] Support filter ordering.
+- [x] Support parameter updates in-place.
+- [x] Define graph reset semantics.
+- [x] Ensure graph mutation cannot race with processing.
+- [x] Define single-owner/thread-safety rules.
+
 API:
 
 ```ts
 const dsp = createDSP({ sampleRate: 48000, channels: 2, format: "f32" });
-dsp.setEQ([
-  { type: "lowShelf", frequency: 100, gain: 5 },
-  { type: "peaking", frequency: 1000, gain: 3, q: 1 },
+dsp.addEQ("eq", [
+  { type: "lowShelf", frequency: 100, gain: 4 },
+  { type: "peaking", frequency: 1000, q: 1, gain: 3 },
   { type: "highShelf", frequency: 8000, gain: 2 },
 ]);
+dsp.addBiquad("tone", { type: "lowPass", frequency: 12000, q: 0.707 });
+dsp.setFilterOrder(["eq", "tone"]);
 const output = dsp.process(pcm);
-dsp.clearEQ();
+dsp.updateBiquad("tone", { type: "lowPass", frequency: 10000, q: 0.707 });
+dsp.removeFilter("tone");
 ```
 
-Phase 5 supports up to 16 EQ bands. Each band is a low-shelf, peaking, or high-shelf biquad with independent per-channel state. `setEQ()` swaps the configured band chain atomically from the native caller's perspective; existing filter history is retained only when parameters are changed in-place by future graph APIs, while a new `setEQ()` configuration starts fresh state for the supplied band chain. `clearEQ()` removes all EQ bands. EQ gain is limited to -24..24 dB and frequencies must remain below Nyquist.
-
-### Phase 6 — Filter graph
-
-- [ ] Introduce a native filter graph abstraction.
-- [ ] Add/remove filters without restarting the processing pipeline.
-- [ ] Define stable filter IDs.
-- [ ] Support filter ordering.
-- [ ] Support parameter updates in-place.
-- [ ] Define graph reset semantics.
-- [ ] Ensure graph mutation cannot race with processing.
-- [ ] Define single-owner/thread-safety rules.
-
-Expected processing model:
-
-```text
-PCM
- |
- v
-Volume -> EQ -> Limiter -> PCM
-```
+The graph is owned by the DSP instance and is synchronously mutated through the JS API; `process()` is synchronous, so graph mutation cannot interleave with native processing. Filter IDs are unique within an instance, ordering is explicit, and in-place updates retain compatible biquad delay-line state. `reset()` clears graph configuration and processing state.
 
 ### Phase 7 — Dynamics processing
-
 - [ ] Limiter.
 - [ ] Compressor if required.
 - [ ] Soft clipping if required.
