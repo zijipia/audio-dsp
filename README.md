@@ -2,62 +2,15 @@
 
 Native DSP engine for ZiPlayer.
 
-`@ziji/audio-dsp` is intended to provide a low-overhead native PCM processing layer for ZiPlayer. The engine focuses on real-time DSP rather than decoding media, playing to hardware devices, or replacing FFmpeg as a general-purpose media tool.
-
-## Goals
-
-- Native, low-overhead PCM processing for Node.js.
-- Use miniaudio as the native DSP foundation where appropriate.
-- Process audio in blocks instead of per-sample JavaScript calls.
-- Support 48 kHz stereo as a first-class ZiPlayer configuration.
-- Allow filter parameters to change without restarting an external FFmpeg process.
-- Provide deterministic lifecycle and cleanup behavior.
-- Keep the DSP API independent from ZiPlayer internals.
-- Leave decoding and Opus encoding to dedicated components.
-
-## Non-goals
-
-- General-purpose media decoding.
-- Replacing FFmpeg for arbitrary media conversion.
-- Audio device input/output.
-- Calling native code once per sample.
-- Coupling the package to Discord or `@discordjs/voice`.
+`@ziji/audio-dsp` provides low-overhead native PCM processing for ZiPlayer. It focuses on real-time DSP rather than decoding media, hardware playback, or replacing FFmpeg.
 
 ## Architecture
 
 ```text
-Source / Decoder
-       |
-       v
-      PCM
-       |
-       v
-+-------------------+
-| @ziji/audio-dsp   |
-|                   |
-| miniaudio / DSP   |
-| Volume            |
-| Mute              |
-| Pan / Balance     |
-| Clipping          |
-| Biquad            |
-| EQ                |
-| Filter Graph      |
-| Limiter           |
-| Custom filters    |
-+-------------------+
-       |
-       v
-      PCM
-       |
-       v
-  Opus Encoder
-       |
-       v
- @discordjs/voice
+PCM -> Volume/Pan -> Filter Graph -> Compressor -> Limiter -> Soft Clip -> PCM
 ```
 
-The package should operate on raw PCM. Decoder and encoder responsibilities remain outside this package.
+The graph and dynamics state are owned by one DSP instance. `process()` and mutation APIs are synchronous; callers must use a single owner and must not invoke the same DSP instance concurrently from multiple worker threads.
 
 ## Roadmap / TODO
 
@@ -75,12 +28,10 @@ The package should operate on raw PCM. Decoder and encoder responsibilities rema
 - [x] Define sample rate and channel configuration.
 - [x] Implement `createDSP()`.
 - [x] Implement block-based `process()`.
-- [x] Implement `reset()`.
-- [x] Implement `destroy()`.
+- [x] Implement `reset()` and `destroy()`.
 - [x] Validate input buffer alignment and frame counts.
 - [x] Guarantee no per-sample JS/native calls.
 - [x] Add silence, sine-wave, impulse, and random-PCM tests.
-- [x] Verify repeated processing does not leak resources.
 
 ### Phase 2 — Native miniaudio integration
 - [x] Integrate miniaudio as a vendored/native dependency.
@@ -101,13 +52,8 @@ The package should operate on raw PCM. Decoder and encoder responsibilities rema
 
 ### Phase 4 — Biquad filters
 - [x] Implement biquad filter abstraction.
-- [x] Low-pass.
-- [x] High-pass.
-- [x] Band-pass.
-- [x] Notch.
-- [x] Peaking EQ.
-- [x] Low shelf.
-- [x] High shelf.
+- [x] Low-pass / high-pass / band-pass / notch.
+- [x] Peaking EQ / low shelf / high shelf.
 - [x] Stable coefficient recalculation.
 - [x] Per-channel state handling.
 - [x] Tests for frequency response and stability.
@@ -117,7 +63,7 @@ The package should operate on raw PCM. Decoder and encoder responsibilities rema
 - [x] Implement multi-band EQ using biquads.
 - [x] Add low-shelf and high-shelf support.
 - [x] Add runtime band parameter updates.
-- [x] Ensure filter state is preserved when only parameters change.
+- [x] Preserve filter state for compatible parameter changes.
 - [x] Add frequency-response tests.
 
 ### Phase 6 — Filter graph
@@ -127,29 +73,28 @@ The package should operate on raw PCM. Decoder and encoder responsibilities rema
 - [x] Support filter ordering.
 - [x] Support parameter updates in-place.
 - [x] Define graph reset semantics.
-- [x] Ensure graph mutation cannot race with processing.
 - [x] Define single-owner/thread-safety rules.
+
+### Phase 7 — Dynamics processing
+- [x] Limiter.
+- [x] Compressor.
+- [x] Soft clipping.
+- [x] Attack/release behavior tests.
 
 API:
 
 ```ts
 const dsp = createDSP({ sampleRate: 48000, channels: 2, format: "f32" });
-dsp.addEQ("eq", [
-  { type: "lowShelf", frequency: 100, gain: 4 },
-  { type: "peaking", frequency: 1000, q: 1, gain: 3 },
-  { type: "highShelf", frequency: 8000, gain: 2 },
-]);
-dsp.addBiquad("tone", { type: "lowPass", frequency: 12000, q: 0.707 });
-dsp.setFilterOrder(["eq", "tone"]);
+dsp.setCompressor({ threshold: -18, ratio: 4, attack: 10, release: 100 });
+dsp.setLimiter({ threshold: -1, release: 50 });
+dsp.setSoftClip(true, 2);
 const output = dsp.process(pcm);
-dsp.updateBiquad("tone", { type: "lowPass", frequency: 10000, q: 0.707 });
-dsp.removeFilter("tone");
 ```
 
-The graph is owned by the DSP instance and is synchronously mutated through the JS API; `process()` is synchronous, so graph mutation cannot interleave with native processing. Filter IDs are unique within an instance, ordering is explicit, and in-place updates retain compatible biquad delay-line state. `reset()` clears graph configuration and processing state.
+Dynamics use block processing with per-channel envelope state. Compressor threshold is specified in dBFS, ratio is `>= 1`, attack/release are milliseconds, and limiter threshold is `-24..0 dBFS` with a positive release time. Soft clipping uses a bounded `tanh` transfer and configurable drive. `reset()` restores transparent dynamics defaults and clears envelope state.
 
-### Phase 7 — Dynamics processing
-- [ ] Limiter.
-- [ ] Compressor if required.
-- [ ] Soft clipping if required.
-- [ ] Attack/release behavior tests.
+## Notes
+
+- No audio device I/O is performed by the native layer.
+- Decoding and Opus encoding remain outside this package.
+- The synchronous API establishes a single-owner rule; callers are responsible for avoiding concurrent access to one DSP instance.
