@@ -89,13 +89,13 @@ Target first configuration:
 
 ### Phase 2 — Native miniaudio integration
 
-- [ ] Integrate miniaudio as a vendored/native dependency.
-- [ ] Use miniaudio for PCM/DSP functionality only.
-- [ ] Avoid `ma_device` and hardware audio I/O.
-- [ ] Define a small native DSP context around miniaudio.
-- [ ] Ensure native resources are released on `destroy()`.
-- [ ] Make repeated `reset()` safe.
-- [ ] Add native error handling and status propagation.
+- [x] Integrate miniaudio as a vendored/native dependency.
+- [x] Use miniaudio for PCM/DSP functionality only.
+- [x] Avoid `ma_device` and hardware audio I/O.
+- [x] Define a small native DSP context around miniaudio.
+- [x] Ensure native resources are released on `destroy()`.
+- [x] Make repeated `reset()` safe.
+- [x] Add native error handling and status propagation.
 
 ### Phase 3 — Basic filters
 
