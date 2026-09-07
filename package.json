@@ -1,6 +1,6 @@
 {
   "name": "@ziji/audio-dsp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Native DSP engine for ZiPlayer",
   "license": "MIT",
   "type": "commonjs",
