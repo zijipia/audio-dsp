@@ -6,11 +6,11 @@ function makeDSP(format = "s16") {
   return createDSP({ sampleRate: 48000, channels: 2, format });
 }
 
-test("native addon loads through N-API", () => {
-  assert.equal(nativeVersion(), "0.2.0-phase1");
+test("native addon loads through N-API and miniaudio-backed Phase 2 build", () => {
+  assert.equal(nativeVersion(), "0.3.0-phase2-miniaudio");
 });
 
-test("silence is preserved for s16 block processing", () => {
+test("silence is preserved through the miniaudio converter for s16", () => {
   const dsp = makeDSP("s16");
   const input = Buffer.alloc(960 * 2 * 2);
   const output = dsp.process(input);
@@ -19,7 +19,7 @@ test("silence is preserved for s16 block processing", () => {
   dsp.destroy();
 });
 
-test("sine-wave samples are preserved for f32 block processing", () => {
+test("sine-wave samples are preserved through the miniaudio converter for f32", () => {
   const dsp = makeDSP("f32");
   const input = Buffer.alloc(480 * 2 * 4);
   const view = new Float32Array(input.buffer, input.byteOffset, input.byteLength / 4);
@@ -47,7 +47,7 @@ test("random PCM is preserved without per-sample JS calls", () => {
   dsp.destroy();
 });
 
-test("reset is repeatable and destroy is idempotent", () => {
+test("reset reinitializes the native converter and destroy is idempotent", () => {
   const dsp = makeDSP("s16");
   const input = Buffer.alloc(480 * 4, 7);
   assert.deepEqual(dsp.process(input), input);
