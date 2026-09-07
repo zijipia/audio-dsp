@@ -8,27 +8,27 @@ The library is designed to keep the hot audio path in native code while exposing
 
 ## Features
 
-* Native N-API implementation
-* Node.js `>= 22`
-* PCM `s16` and `f32`
-* Mono and multi-channel processing
-* Configurable sample rate
-* Volume / gain
-* Mute
-* Stereo pan / balance
-* Biquad filters
-* Multi-band EQ
-* Native filter graph
-* Runtime filter updates
-* Compressor
-* Limiter
-* Soft clipping
-* Per-channel filter state
-* Per-channel dynamics envelope state
-* Block-based processing
-* Explicit DSP lifecycle
-* Cross-platform native build
-* Automated GitHub Release builds
+- Native N-API implementation
+- Node.js `>= 22`
+- PCM `s16` and `f32`
+- Mono and multi-channel processing
+- Configurable sample rate
+- Volume / gain
+- Mute
+- Stereo pan / balance
+- Biquad filters
+- Multi-band EQ
+- Native filter graph
+- Runtime filter updates
+- Compressor
+- Limiter
+- Soft clipping
+- Per-channel filter state
+- Per-channel dynamics envelope state
+- Block-based processing
+- Explicit DSP lifecycle
+- Cross-platform native build
+- Automated GitHub Release builds
 
 ## Processing pipeline
 
@@ -140,11 +140,11 @@ const dsp = createDSP({
 
 Configuration:
 
-| Option       | Description              |
-| ------------ | ------------------------ |
-| `sampleRate` | Sample rate in Hz        |
-| `channels`   | Number of audio channels |
-| `format`     | `s16` or `f32`           |
+| Option | Description |
+| --- | --- |
+| `sampleRate` | Sample rate in Hz |
+| `channels` | Number of audio channels |
+| `format` | `s16` or `f32` |
 
 The sample rate and channel configuration belong to the DSP instance and remain fixed for its lifetime.
 
@@ -365,12 +365,12 @@ dsp.setCompressor({
 
 Parameters:
 
-| Parameter   | Description                  |
-| ----------- | ---------------------------- |
-| `threshold` | Threshold in dBFS            |
-| `ratio`     | Compression ratio, `>= 1`    |
-| `attack`    | Attack time in milliseconds  |
-| `release`   | Release time in milliseconds |
+| Parameter | Description |
+| --- | --- |
+| `threshold` | Threshold in dBFS |
+| `ratio` | Compression ratio, `>= 1` |
+| `attack` | Attack time in milliseconds |
+| `release` | Release time in milliseconds |
 
 Example:
 
@@ -567,10 +567,10 @@ The native layer uses miniaudio for PCM/DSP infrastructure only.
 
 It does not create:
 
-* audio devices
-* playback devices
-* capture devices
-* hardware audio streams
+- audio devices
+- playback devices
+- capture devices
+- hardware audio streams
 
 Audio decoding, encoding, playback and device management remain outside this package.
 
@@ -578,12 +578,12 @@ Audio decoding, encoding, playback and device management remain outside this pac
 
 Requirements:
 
-* Node.js `>= 22`
-* npm
-* Python 3
-* C/C++ build toolchain
-* Git
-* Git submodules
+- Node.js `>= 22`
+- npm
+- Python 3
+- C/C++ build toolchain
+- Git
+- Git submodules
 
 Initialize dependencies:
 
@@ -609,26 +609,26 @@ The native addon is built as part of the npm build lifecycle.
 
 The test suite covers:
 
-* PCM processing
-* silence
-* sine waves
-* impulse responses
-* random PCM
-* lifecycle and destruction
-* volume
-* mute
-* pan
-* clipping protection
-* biquad filters
-* EQ
-* filter graph
-* filter ordering
-* state preservation
-* compressor
-* limiter
-* soft clipping
-* runtime parameter updates
-* invalid parameter handling
+- PCM processing
+- silence
+- sine waves
+- impulse responses
+- random PCM
+- lifecycle and destruction
+- volume
+- mute
+- pan
+- clipping protection
+- biquad filters
+- EQ
+- filter graph
+- filter ordering
+- state preservation
+- compressor
+- limiter
+- soft clipping
+- runtime parameter updates
+- invalid parameter handling
 
 Run:
 
@@ -640,9 +640,9 @@ npm test
 
 Every change is intended to be validated across:
 
-* Linux
-* macOS
-* Windows
+- Linux
+- macOS
+- Windows
 
 and supported Node.js versions.
 
@@ -696,14 +696,14 @@ Current development line:
 
 Current implementation:
 
-* Phase 0 — Foundation: complete
-* Phase 1 — PCM processing: complete
-* Phase 2 — miniaudio integration: complete
-* Phase 3 — Basic filters: complete
-* Phase 4 — Biquad filters: complete
-* Phase 5 — EQ: complete
-* Phase 6 — Filter graph: complete
-* Phase 7 — Dynamics processing: complete
+- Phase 0 — Foundation: complete
+- Phase 1 — PCM processing: complete
+- Phase 2 — miniaudio integration: complete
+- Phase 3 — Basic filters: complete
+- Phase 4 — Biquad filters: complete
+- Phase 5 — EQ: complete
+- Phase 6 — Filter graph: complete
+- Phase 7 — Dynamics processing: complete
 
 The project is currently focused on building a stable native DSP foundation for ZiPlayer and other Node.js audio-processing applications.
 
@@ -713,12 +713,12 @@ The project is currently focused on building a stable native DSP foundation for 
 
 It is **not**:
 
-* an audio player
-* an audio decoder
-* an audio encoder
-* an FFmpeg replacement
-* an audio device abstraction
-* a streaming server
+- an audio player
+- an audio decoder
+- an audio encoder
+- an FFmpeg replacement
+- an audio device abstraction
+- a streaming server
 
 Applications are responsible for obtaining PCM audio and sending processed PCM to the appropriate playback/output layer.
 
