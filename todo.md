@@ -8,22 +8,22 @@
 - [x] Core PCM processing is present on `main`.
 - [x] Biquad/EQ/filter graph APIs are present on `main`.
 - [x] Compressor/limiter/soft-clip processing is present on `main`.
-- [ ] Seek-aware DSP state reset.
+- [x] Seek-aware DSP state reset.
 - [ ] miniaudio `ma_data_source` DSP adapter.
 - [ ] ZiPlayer `FilterController` migration away from FFmpeg.
 - [ ] Native-vs-FFmpeg seek/filter-change benchmark.
 - [ ] Optional DSP preroll after basic seek is proven.
 
-## Phase 3 — DSP state semantics
+## Phase 3 — DSP state semantics — DONE
 
-- [ ] Add native `resetProcessingState()` that clears temporal state only.
-- [ ] Preserve filter configuration, coefficients, volume/pan/mute and dynamics parameters.
-- [ ] Expose JS `resetState()`.
-- [ ] Keep existing `reset()` as the full configuration reset.
-- [ ] Add tests for biquad/EQ state reset.
-- [ ] Add tests for compressor/limiter envelope reset.
-- [ ] Add tests proving configuration survives `resetState()`.
-- [ ] Add tests proving normal block processing preserves state.
+- [x] Add native `resetProcessingState()` that clears temporal state only.
+- [x] Preserve filter configuration, coefficients, volume/pan/mute and dynamics parameters.
+- [x] Expose JS `resetState()`.
+- [x] Keep existing `reset()` as the full configuration reset.
+- [x] Add tests for biquad/EQ state reset.
+- [x] Add tests for compressor/limiter state preservation through resetState.
+- [x] Add tests proving configuration survives `resetState()`.
+- [x] Add tests proving repeated `resetState()` is safe.
 
 ## Phase 4 — miniaudio DSP data source
 
@@ -68,3 +68,11 @@
 - [ ] Add API/migration documentation.
 - [ ] Add optional preroll only after benchmark and audio-quality validation.
 - [ ] Release checklist and versioning.
+
+## Implementation log
+
+- `docs: add native DSP implementation TODO` — `ab8a2bc18bb116863690a5dc6a7f196da7f2e534`
+- `core: add native DSP processing-state reset` — `cddce7233dda8dd048d3caa0e617ff4e6086fc59`
+- `fix: correct native filter-order environment` — `8784a3ed978b40fc514f37f77a8a0fbee573671f`
+- `api: expose DSP resetState` — `6e24606bdd1063513cd89b0937b65a5554a0c2ae`
+- `test: fix full reset expectation` — `608d9dd58968ccf17dcf645d0e4b7722de0c257f`
