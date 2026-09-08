@@ -69,11 +69,6 @@ static ma_result set_looping(ma_data_source* pDataSource, ma_bool32 isLooping) {
     return ma_data_source_set_looping(s->upstream, isLooping);
 }
 
-static ma_result get_looping(ma_data_source* pDataSource, ma_bool32* pIsLooping) {
-    auto* s = self(pDataSource);
-    return ma_data_source_is_looping(s->upstream, pIsLooping);
-}
-
 static ma_data_source_vtable g_vtable = {
     read_pcm_frames,
     seek_to_pcm_frame,
@@ -81,7 +76,7 @@ static ma_data_source_vtable g_vtable = {
     get_cursor_in_pcm_frames,
     get_length_in_pcm_frames,
     set_looping,
-    get_looping
+    0
 };
 
 } // namespace
