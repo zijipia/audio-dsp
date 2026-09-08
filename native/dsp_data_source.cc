@@ -1,7 +1,5 @@
 #include "dsp_data_source.h"
 
-#include <vector>
-
 namespace audio_dsp {
 namespace {
 
@@ -9,28 +7,33 @@ static DSPDataSource* self(ma_data_source* p) {
     return reinterpret_cast<DSPDataSource*>(p);
 }
 
+static ma_result ensure_scratch(DSPDataSource* s, ma_uint64 frameCount) {
+    const size_t bytes = static_cast<size_t>(frameCount) * s->bytesPerFrame;
+    if (bytes > s->scratch.size()) {
+        try {
+            s->scratch.resize(bytes);
+        } catch (...) {
+            return MA_OUT_OF_MEMORY;
+        }
+    }
+    return MA_SUCCESS;
+}
+
 static ma_result read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) {
     auto* s = self(pDataSource);
     if (pFramesRead) *pFramesRead = 0;
     if (frameCount == 0) return MA_SUCCESS;
 
-    if (pFramesOut == nullptr) {
-        ma_uint64 framesRead = 0;
-        ma_result r = ma_data_source_read_pcm_frames(s->upstream, nullptr, frameCount, &framesRead);
-        if (r != MA_SUCCESS && r != MA_AT_END) return r;
-        s->cursor += framesRead;
-        if (framesRead > 0 && s->resetState) s->resetState(s->dsp);
-        if (pFramesRead) *pFramesRead = framesRead;
-        return r;
-    }
+    ma_result r = ensure_scratch(s, frameCount);
+    if (r != MA_SUCCESS) return r;
 
-    std::vector<ma_uint8> input(static_cast<size_t>(frameCount) * s->bytesPerFrame);
     ma_uint64 framesRead = 0;
-    ma_result r = ma_data_source_read_pcm_frames(s->upstream, input.data(), frameCount, &framesRead);
+    r = ma_data_source_read_pcm_frames(s->upstream, s->scratch.data(), frameCount, &framesRead);
     if (r != MA_SUCCESS && r != MA_AT_END) return r;
 
     if (framesRead > 0) {
-        r = s->process(s->dsp, input.data(), pFramesOut, static_cast<size_t>(framesRead));
+        void* output = pFramesOut ? pFramesOut : s->scratch.data();
+        r = s->process(s->dsp, s->scratch.data(), output, static_cast<size_t>(framesRead));
         if (r != MA_SUCCESS) return r;
         s->cursor += framesRead;
     }
@@ -43,6 +46,7 @@ static ma_result seek_to_pcm_frame(ma_data_source* pDataSource, ma_uint64 frameI
     auto* s = self(pDataSource);
     ma_result r = ma_data_source_seek_to_pcm_frame(s->upstream, frameIndex);
     if (r != MA_SUCCESS) return r;
+
     s->cursor = frameIndex;
     if (s->resetState) s->resetState(s->dsp);
     return MA_SUCCESS;
@@ -55,6 +59,7 @@ static ma_result get_data_format(ma_data_source* pDataSource, ma_format* pFormat
 
 static ma_result get_cursor_in_pcm_frames(ma_data_source* pDataSource, ma_uint64* pCursor) {
     auto* s = self(pDataSource);
+    if (!pCursor) return MA_INVALID_ARGS;
     *pCursor = s->cursor;
     return MA_SUCCESS;
 }
@@ -107,6 +112,7 @@ ma_result dsp_data_source_init(DSPDataSource* s, ma_data_source* upstream, void*
     s->channels = channels;
     s->bytesPerFrame = bps * channels;
     s->cursor = 0;
+    s->scratch.clear();
     return MA_SUCCESS;
 }
 
@@ -121,6 +127,7 @@ void dsp_data_source_uninit(DSPDataSource* s) {
     s->channels = 0;
     s->bytesPerFrame = 0;
     s->cursor = 0;
+    s->scratch.clear();
 }
 
 ma_data_source* dsp_data_source_get(DSPDataSource* s) {
