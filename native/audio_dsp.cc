@@ -6,46 +6,542 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-namespace {
-constexpr double DQ=0.7071067811865476;
-struct B{std::string type;float b0=1,b1=0,b2=0,a1=0,a2=0;std::vector<float>x1,x2,y1,y2;};
-struct N{std::string id,type;std::vector<B> bands;};
-struct Ctx{uint32_t sr=48000,ch=2,bps=4;ma_format fmt=ma_format_f32;ma_data_converter conv{};bool init=false,dead=false;float vol=1,pan=0;bool mute=false;B biquad;std::vector<B> eq,graphDummy;std::vector<N> graph;float limDb=0,limRelease=50;std::vector<float>limEnv;float compDb=0,compRatio=1,compAttack=10,compRelease=100;std::vector<float>compEnv;bool soft=false;float drive=2;};
-Ctx* get(const Napi::CallbackInfo&i){auto*c=i.This().As<Napi::Object>().Get("_context").As<Napi::External<Ctx>>().Data();if(!c||c->dead)throw Napi::Error::New(i.Env(),"AudioDSP instance has been destroyed");return c;}
-void states(B&b,uint32_t ch){b.x1.assign(ch,0);b.x2.assign(ch,0);b.y1.assign(ch,0);b.y2.assign(ch,0);}
-void init(Ctx*c){auto x=ma_data_converter_config_init(c->fmt,c->fmt,c->ch,c->ch,c->sr,c->sr);if(ma_data_converter_init(&x,nullptr,&c->conv)!=MA_SUCCESS)throw std::runtime_error("miniaudio data converter initialization failed");c->init=true;}
-void coeff(B&b,uint32_t sr,const std::string&t,double f,double q,double g,uint32_t ch,bool keep=false){auto x1=b.x1,x2=b.x2,y1=b.y1,y2=b.y2;double pi=std::acos(-1),w=2*pi*f/sr,cs=std::cos(w),sn=std::sin(w),a=sn/(2*q),A=std::pow(10,g/40),bt=2*std::sqrt(A)*a,b0,b1,b2,a0,a1,a2;if(t=="lowPass"){b0=(1-cs)/2;b1=1-cs;b2=b0;a0=1+a;a1=-2*cs;a2=1-a;}else if(t=="highPass"){b0=(1+cs)/2;b1=-(1+cs);b2=b0;a0=1+a;a1=-2*cs;a2=1-a;}else if(t=="bandPass"){b0=a;b1=0;b2=-a;a0=1+a;a1=-2*cs;a2=1-a;}else if(t=="notch"){b0=1;b1=-2*cs;b2=1;a0=1+a;a1=-2*cs;a2=1-a;}else if(t=="peaking"){b0=1+a*A;b1=-2*cs;b2=1-a*A;a0=1+a/A;a1=-2*cs;a2=1-a/A;}else if(t=="lowShelf"){b0=A*((A+1)-(A-1)*cs+bt);b1=2*A*((A-1)-(A+1)*cs);b2=A*((A+1)-(A-1)*cs-bt);a0=(A+1)+(A-1)*cs+bt;a1=-2*((A-1)+(A+1)*cs);a2=(A+1)+(A-1)*cs-bt;}else{b0=A*((A+1)+(A-1)*cs+bt);b1=-2*A*((A-1)+(A+1)*cs);b2=A*((A+1)+(A-1)*cs-bt);a0=(A+1)-(A-1)*cs+bt;a1=2*((A-1)-(A+1)*cs);a2=(A+1)-(A-1)*cs-bt;}b.type=t;b.b0=b0/a0;b.b1=b1/a0;b.b2=b2/a0;b.a1=a1/a0;b.a2=a2/a0;if(keep&&x1.size()==ch){b.x1=std::move(x1);b.x2=std::move(x2);b.y1=std::move(y1);b.y2=std::move(y2);}else states(b,ch);}
-float run(B&b,uint32_t ch,float x){float y=b.b0*x+b.b1*b.x1[ch]+b.b2*b.x2[ch]-b.a1*b.y1[ch]-b.a2*b.y2[ch];b.x2[ch]=b.x1[ch];b.x1[ch]=x;b.y2[ch]=b.y1[ch];b.y1[ch]=y;return y;}
-float clamp(float x){return std::max(-1.f,std::min(1.f,x));}
-void validate(double f,double q,double g,uint32_t sr,Napi::Env e,const char*what){if(!std::isfinite(f)||f<=0||f>=sr/2.0||!std::isfinite(q)||q<=0||!std::isfinite(g)||g<-24||g>24)throw Napi::RangeError::New(e,std::string("invalid ")+what+" parameters");}
-float dynamics(Ctx*c,uint32_t ch,float x){float ax=std::fabs(x),thr=std::pow(10.f,c->compDb/20.f),env=c->compEnv[ch];float target=1;if(c->compRatio>1&&ax>thr)target=std::pow(ax/thr,1.f/c->compRatio-1.f);float a=std::exp(-1.f/(std::max(.1f,c->compAttack)*.001f*c->sr)),r=std::exp(-1.f/(std::max(.1f,c->compRelease)*.001f*c->sr));env=target+(env-target)*(target<env?a:r);c->compEnv[ch]=env;x*=env;ax=std::fabs(x);float lt=std::pow(10.f,c->limDb/20.f),le=c->limEnv[ch];float lg=ax>lt?lt/std::max(ax,1e-12f):1;float lr=std::exp(-1.f/(std::max(.1f,c->limRelease)*.001f*c->sr));le=lg<le?lg:lg+(le-lg)*lr;c->limEnv[ch]=le;x*=le;if(c->soft){float d=std::max(.001f,c->drive);x=std::tanh(x*d)/std::tanh(d);}return clamp(x);}
-void apply(Ctx*c,uint8_t*d,size_t fr){float g=c->mute?0:c->vol,l=g*(c->pan>0?1-c->pan:1),r=g*(c->pan<0?1+c->pan:1);auto one=[&](uint32_t ch,float x){float q=c->ch>1?(ch==0?l:(ch==1?r:g)):g;x*=q;if(!c->graph.empty()){for(auto&n:c->graph)for(auto&b:n.bands)x=run(b,ch,x);}else{if(!c->biquad.type.empty())x=run(c->biquad,ch,x);for(auto&b:c->eq)x=run(b,ch,x);}return dynamics(c,ch,x);};if(c->fmt==ma_format_s16){auto*s=(int16_t*)d;for(size_t f=0;f<fr;f++)for(uint32_t ch=0;ch<c->ch;ch++)s[f*c->ch+ch]=(int16_t)std::lrintf(std::max(-32768.f,std::min(32767.f,one(ch,s[f*c->ch+ch]/32768.f)*32768.f)));}else{auto*s=(float*)d;for(size_t f=0;f<fr;f++)for(uint32_t ch=0;ch<c->ch;ch++)s[f*c->ch+ch]=one(ch,s[f*c->ch+ch]);}}
-Napi::Value Process(const Napi::CallbackInfo&i){auto e=i.Env();auto*c=get(i);if(i.Length()<1||!i[0].IsBuffer())throw Napi::TypeError::New(e,"process() requires a Buffer");auto in=i[0].As<Napi::Buffer<uint8_t>>();size_t fb=(size_t)c->ch*c->bps;if(in.Length()%fb)throw Napi::RangeError::New(e,"input buffer is not aligned to complete audio frames");size_t fr=in.Length()/fb;auto out=Napi::Buffer<uint8_t>::New(e,in.Length());if(!fr)return out;ma_uint64 a=fr,z=fr;if(ma_data_converter_process_pcm_frames(&c->conv,in.Data(),&a,out.Data(),&z)!=MA_SUCCESS||a!=fr||z!=fr)throw Napi::Error::New(e,"miniaudio failed to process PCM frames");apply(c,out.Data(),fr);return out;}
-Napi::Value SetVolume(const Napi::CallbackInfo&i){auto*c=get(i);auto e=i.Env();if(i.Length()<1||!i[0].IsNumber())throw Napi::TypeError::New(e,"volume must be a number");double v=i[0].As<Napi::Number>().DoubleValue();if(!std::isfinite(v)||v<0||v>4)throw Napi::RangeError::New(e,"volume must be between 0 and 4");c->vol=(float)v;return e.Undefined();}
-Napi::Value SetMute(const Napi::CallbackInfo&i){auto*c=get(i);auto e=i.Env();if(i.Length()<1||!i[0].IsBoolean())throw Napi::TypeError::New(e,"muted must be boolean");c->mute=i[0].As<Napi::Boolean>().Value();return e.Undefined();}
-Napi::Value SetPan(const Napi::CallbackInfo&i){auto*c=get(i);auto e=i.Env();if(i.Length()<1||!i[0].IsNumber())throw Napi::TypeError::New(e,"pan must be a number");double v=i[0].As<Napi::Number>().DoubleValue();if(!std::isfinite(v)||v<-1||v>1)throw Napi::RangeError::New(e,"pan must be between -1 and 1");c->pan=(float)v;return e.Undefined();}
-void parseB(const Napi::Object&o,Ctx*c,B&b,bool keep){std::string t=o.Get("type").As<Napi::String>().Utf8Value();double f=o.Get("frequency").As<Napi::Number>().DoubleValue(),q=o.Get("q").IsUndefined()?DQ:o.Get("q").As<Napi::Number>().DoubleValue(),g=o.Get("gain").IsUndefined()?0:o.Get("gain").As<Napi::Number>().DoubleValue();validate(f,q,g,c->sr,o.Env(),"biquad");coeff(b,c->sr,t,f,q,g,c->ch,keep);}
-Napi::Value SetBiquad(const Napi::CallbackInfo&i){auto*c=get(i);parseB(i[0].As<Napi::Object>(),c,c->biquad,false);return i.Env().Undefined();}Napi::Value ClearBiquad(const Napi::CallbackInfo&i){auto*c=get(i);c->biquad=B{};states(c->biquad,c->ch);return i.Env().Undefined();}
-void parseEQ(const Napi::Array&a,Ctx*c,std::vector<B>&out,bool keep){if(a.Length()>16)throw Napi::RangeError::New(a.Env(),"EQ supports at most 16 bands");auto old=out;out.clear();for(uint32_t k=0;k<a.Length();k++){auto o=a.Get(k).As<Napi::Object>();std::string t=o.Get("type").As<Napi::String>().Utf8Value();double f=o.Get("frequency").As<Napi::Number>().DoubleValue(),q=o.Get("q").IsUndefined()?DQ:o.Get("q").As<Napi::Number>().DoubleValue(),g=o.Get("gain").As<Napi::Number>().DoubleValue();validate(f,q,g,c->sr,a.Env(),"EQ band");B b;if(keep&&k<old.size()&&old[k].type==t)b=old[k];coeff(b,c->sr,t,f,q,g,c->ch,keep&&k<old.size()&&old[k].type==t);out.push_back(std::move(b));}}
-Napi::Value SetEQ(const Napi::CallbackInfo&i){auto*c=get(i);if(!i[0].IsArray())throw Napi::TypeError::New(i.Env(),"setEQ() requires an array");parseEQ(i[0].As<Napi::Array>(),c,c->eq,true);return i.Env().Undefined();}Napi::Value ClearEQ(const Napi::CallbackInfo&i){get(i)->eq.clear();return i.Env().Undefined();}
-void ensure(Ctx*c,const std::string&id,Napi::Env e){if(id.empty())throw Napi::TypeError::New(e,"filter id must be a non-empty string");for(auto&n:c->graph)if(n.id==id)throw Napi::Error::New(e,"filter id already exists");}
-Napi::Value AddB(const Napi::CallbackInfo&i){auto*c=get(i);std::string id=i[0].As<Napi::String>().Utf8Value();ensure(c,id,i.Env());N n;n.id=id;n.type="biquad";B b;parseB(i[1].As<Napi::Object>(),c,b,false);n.bands.push_back(std::move(b));c->graph.push_back(std::move(n));return i.Env().Undefined();}
-Napi::Value AddE(const Napi::CallbackInfo&i){auto*c=get(i);std::string id=i[0].As<Napi::String>().Utf8Value();ensure(c,id,i.Env());N n;n.id=id;n.type="eq";parseEQ(i[1].As<Napi::Array>(),c,n.bands,false);c->graph.push_back(std::move(n));return i.Env().Undefined();}
-Napi::Value Remove(const Napi::CallbackInfo&i){auto*c=get(i);std::string id=i[0].As<Napi::String>().Utf8Value();auto it=std::find_if(c->graph.begin(),c->graph.end(),[&](auto&n){return n.id==id;});if(it==c->graph.end())throw Napi::Error::New(i.Env(),"unknown filter id: "+id);c->graph.erase(it);return i.Env().Undefined();}
-Napi::Value Order(const Napi::CallbackInfo&i){auto*c=get(i);auto a=i[0].As<Napi::Array>();if(a.Length()!=c->graph.size())throw Napi::RangeError::New(i.Env(),"filter order must contain every filter id exactly once");std::vector<N>next;for(uint32_t k=0;k<a.Length();k++){std::string id=a.Get(k).As<Napi::String>().Utf8Value();auto it=std::find_if(c->graph.begin(),c->graph.end(),[&](auto&n){return n.id==id;});if(it==c->graph.end()||std::find_if(next.begin(),next.end(),[&](auto&n){return n.id==id;})!=next.end())throw Napi::RangeError::New(i.Env(),"filter order must contain every filter id exactly once");next.push_back(*it);}c->graph.swap(next);return i.Env().Undefined();}
-Napi::Value UpdateB(const Napi::CallbackInfo&i){auto*c=get(i);std::string id=i[0].As<Napi::String>().Utf8Value();auto it=std::find_if(c->graph.begin(),c->graph.end(),[&](auto&n){return n.id==id;});if(it==c->graph.end()||it->type!="biquad")throw Napi::Error::New(i.Env(),"unknown biquad filter id");parseB(i[1].As<Napi::Object>(),c,it->bands[0],true);return i.Env().Undefined();}
-Napi::Value UpdateE(const Napi::CallbackInfo&i){auto*c=get(i);std::string id=i[0].As<Napi::String>().Utf8Value();auto it=std::find_if(c->graph.begin(),c->graph.end(),[&](auto&n){return n.id==id;});if(it==c->graph.end()||it->type!="eq")throw Napi::Error::New(i.Env(),"unknown EQ filter id");parseEQ(i[1].As<Napi::Array>(),c,it->bands,true);return i.Env().Undefined();}
-Napi::Value Lim(const Napi::CallbackInfo&i){auto*c=get(i);auto o=i[0].As<Napi::Object>();double t=o.Get("threshold").IsUndefined()?-1:o.Get("threshold").As<Napi::Number>().DoubleValue(),r=o.Get("release").IsUndefined()?50:o.Get("release").As<Napi::Number>().DoubleValue();if(!std::isfinite(t)||t>0||t<-24||!std::isfinite(r)||r<=0)throw Napi::RangeError::New(i.Env(),"invalid limiter parameters");c->limDb=(float)t;c->limRelease=(float)r;return i.Env().Undefined();}
-Napi::Value Comp(const Napi::CallbackInfo&i){auto*c=get(i);auto o=i[0].As<Napi::Object>();double t=o.Get("threshold").IsUndefined()?-12:o.Get("threshold").As<Napi::Number>().DoubleValue(),ratio=o.Get("ratio").IsUndefined()?4:o.Get("ratio").As<Napi::Number>().DoubleValue(),a=o.Get("attack").IsUndefined()?10:o.Get("attack").As<Napi::Number>().DoubleValue(),r=o.Get("release").IsUndefined()?100:o.Get("release").As<Napi::Number>().DoubleValue();if(!std::isfinite(t)||t>0||t<-60||!std::isfinite(r)||r<=0||!std::isfinite(a)||a<=0||!std::isfinite(ratio)||ratio<1)throw Napi::RangeError::New(i.Env(),"invalid compressor parameters");c->compDb=(float)t;c->compRatio=(float)ratio;c->compAttack=(float)a;c->compRelease=(float)r;return i.Env().Undefined();}
-Napi::Value Soft(const Napi::CallbackInfo&i){auto*c=get(i);auto o=i[0].As<Napi::Object>();bool en=o.Get("enabled").IsUndefined()?false:o.Get("enabled").As<Napi::Boolean>().Value();double d=o.Get("drive").IsUndefined()?2:o.Get("drive").As<Napi::Number>().DoubleValue();if(!std::isfinite(d)||d<=0)throw Napi::RangeError::New(i.Env(),"invalid soft clip parameters");c->soft=en;c->drive=(float)d;return i.Env().Undefined();}
-Napi::Value ClearLimiter(const Napi::CallbackInfo&i){auto*c=get(i);c->limDb=0;c->limRelease=50;std::fill(c->limEnv.begin(),c->limEnv.end(),1.f);return i.Env().Undefined();}
-Napi::Value ClearCompressor(const Napi::CallbackInfo&i){auto*c=get(i);c->compDb=0;c->compRatio=1;c->compAttack=10;c->compRelease=100;std::fill(c->compEnv.begin(),c->compEnv.end(),1.f);return i.Env().Undefined();}
-void resetProcessingState(Ctx*c){states(c->biquad,c->ch);for(auto&b:c->eq)states(b,c->ch);for(auto&n:c->graph)for(auto&b:n.bands)states(b,c->ch);std::fill(c->limEnv.begin(),c->limEnv.end(),1.f);std::fill(c->compEnv.begin(),c->compEnv.end(),1.f);}
-Napi::Value ResetState(const Napi::CallbackInfo&i){auto*c=get(i);resetProcessingState(c);return i.Env().Undefined();}
-Napi::Value Reset(const Napi::CallbackInfo&i){auto*c=get(i);c->vol=1;c->pan=0;c->mute=false;c->biquad=B{};states(c->biquad,c->ch);c->eq.clear();c->graph.clear();c->limDb=0;c->limRelease=50;c->compDb=0;c->compRatio=1;c->compAttack=10;c->compRelease=100;c->soft=false;c->drive=2;std::fill(c->limEnv.begin(),c->limEnv.end(),1.f);std::fill(c->compEnv.begin(),c->compEnv.end(),1.f);return i.Env().Undefined();}
-Napi::Value Destroy(const Napi::CallbackInfo&i){auto*c=get(i);if(c->init)ma_data_converter_uninit(&c->conv,nullptr);c->dead=true;delete c;return i.Env().Undefined();}
-Napi::Object Create(const Napi::CallbackInfo&i){Napi::Env e=i.Env();Napi::Object o=i[0].As<Napi::Object>();auto*c=new Ctx;c->sr=o.Get("sampleRate").As<Napi::Number>().Uint32Value();c->ch=o.Get("channels").As<Napi::Number>().Uint32Value();std::string f=o.Get("format").As<Napi::String>().Utf8Value();c->fmt=f=="s16"?ma_format_s16:ma_format_f32;c->bps=c->fmt==ma_format_s16?2:4;c->limEnv.assign(c->ch,1);c->compEnv.assign(c->ch,1);states(c->biquad,c->ch);init(c);o.Set("_context",Napi::External<Ctx>::New(e,c));o.Set("process",Napi::Function::New(e,Process));o.Set("setVolume",Napi::Function::New(e,SetVolume));o.Set("setMute",Napi::Function::New(e,SetMute));o.Set("setPan",Napi::Function::New(e,SetPan));o.Set("setBiquad",Napi::Function::New(e,SetBiquad));o.Set("clearBiquad",Napi::Function::New(e,ClearBiquad));o.Set("setEQ",Napi::Function::New(e,SetEQ));o.Set("clearEQ",Napi::Function::New(e,ClearEQ));o.Set("addBiquad",Napi::Function::New(e,AddB));o.Set("addEQ",Napi::Function::New(e,AddE));o.Set("removeFilter",Napi::Function::New(e,Remove));o.Set("setFilterOrder",Napi::Function::New(e,Order));o.Set("updateBiquad",Napi::Function::New(e,UpdateB));o.Set("updateEQ",Napi::Function::New(e,UpdateE));o.Set("setLimiter",Napi::Function::New(e,Lim));o.Set("clearLimiter",Napi::Function::New(e,ClearLimiter));o.Set("setCompressor",Napi::Function::New(e,Comp));o.Set("clearCompressor",Napi::Function::New(e,ClearCompressor));o.Set("setSoftClip",Napi::Function::New(e,Soft));o.Set("resetState",Napi::Function::New(e,ResetState));o.Set("reset",Napi::Function::New(e,Reset));o.Set("destroy",Napi::Function::New(e,Destroy));return o;}
-Napi::Value Version(const Napi::CallbackInfo&i){return Napi::String::New(i.Env(),"0.8.0-phase7-dynamics");}
+namespace
+{
+    constexpr double DQ = 0.7071067811865476;
+    struct B
+    {
+        std::string type;
+        float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+        std::vector<float> x1, x2, y1, y2;
+    };
+    struct N
+    {
+        std::string id, type;
+        std::vector<B> bands;
+    };
+    struct Ctx
+    {
+        uint32_t sr = 48000, ch = 2, bps = 4;
+        ma_format fmt = ma_format_f32;
+        ma_data_converter conv{};
+        bool init = false, dead = false;
+        float vol = 1, pan = 0;
+        bool mute = false;
+        B biquad;
+        std::vector<B> eq, graphDummy;
+        std::vector<N> graph;
+        float limDb = 0, limRelease = 50;
+        std::vector<float> limEnv;
+        float compDb = 0, compRatio = 1, compAttack = 10, compRelease = 100;
+        std::vector<float> compEnv;
+        bool soft = false;
+        float drive = 2;
+    };
+    Ctx *get(const Napi::CallbackInfo &i)
+    {
+        auto *c = i.This().As<Napi::Object>().Get("_context").As<Napi::External<Ctx>>().Data();
+        if (!c || c->dead)
+            throw Napi::Error::New(i.Env(), "AudioDSP instance has been destroyed");
+        return c;
+    }
+    void states(B &b, uint32_t ch)
+    {
+        b.x1.assign(ch, 0);
+        b.x2.assign(ch, 0);
+        b.y1.assign(ch, 0);
+        b.y2.assign(ch, 0);
+    }
+    void init(Ctx *c)
+    {
+        auto x = ma_data_converter_config_init(c->fmt, c->fmt, c->ch, c->ch, c->sr, c->sr);
+        if (ma_data_converter_init(&x, nullptr, &c->conv) != MA_SUCCESS)
+            throw std::runtime_error("miniaudio data converter initialization failed");
+        c->init = true;
+    }
+    void coeff(B &b, uint32_t sr, const std::string &t, double f, double q, double g, uint32_t ch, bool keep = false)
+    {
+        auto x1 = b.x1, x2 = b.x2, y1 = b.y1, y2 = b.y2;
+        double pi = std::acos(-1), w = 2 * pi * f / sr, cs = std::cos(w), sn = std::sin(w), a = sn / (2 * q), A = std::pow(10, g / 40), bt = 2 * std::sqrt(A) * a, b0, b1, b2, a0, a1, a2;
+        if (t == "lowPass")
+        {
+            b0 = (1 - cs) / 2;
+            b1 = 1 - cs;
+            b2 = b0;
+            a0 = 1 + a;
+            a1 = -2 * cs;
+            a2 = 1 - a;
+        }
+        else if (t == "highPass")
+        {
+            b0 = (1 + cs) / 2;
+            b1 = -(1 + cs);
+            b2 = b0;
+            a0 = 1 + a;
+            a1 = -2 * cs;
+            a2 = 1 - a;
+        }
+        else if (t == "bandPass")
+        {
+            b0 = a;
+            b1 = 0;
+            b2 = -a;
+            a0 = 1 + a;
+            a1 = -2 * cs;
+            a2 = 1 - a;
+        }
+        else if (t == "notch")
+        {
+            b0 = 1;
+            b1 = -2 * cs;
+            b2 = 1;
+            a0 = 1 + a;
+            a1 = -2 * cs;
+            a2 = 1 - a;
+        }
+        else if (t == "peaking")
+        {
+            b0 = 1 + a * A;
+            b1 = -2 * cs;
+            b2 = 1 - a * A;
+            a0 = 1 + a / A;
+            a1 = -2 * cs;
+            a2 = 1 - a / A;
+        }
+        else if (t == "lowShelf")
+        {
+            b0 = A * ((A + 1) - (A - 1) * cs + bt);
+            b1 = 2 * A * ((A - 1) - (A + 1) * cs);
+            b2 = A * ((A + 1) - (A - 1) * cs - bt);
+            a0 = (A + 1) + (A - 1) * cs + bt;
+            a1 = -2 * ((A - 1) + (A + 1) * cs);
+            a2 = (A + 1) + (A - 1) * cs - bt;
+        }
+        else
+        {
+            b0 = A * ((A + 1) + (A - 1) * cs + bt);
+            b1 = -2 * A * ((A - 1) + (A + 1) * cs);
+            b2 = A * ((A + 1) + (A - 1) * cs - bt);
+            a0 = (A + 1) - (A - 1) * cs + bt;
+            a1 = 2 * ((A - 1) - (A + 1) * cs);
+            a2 = (A + 1) - (A - 1) * cs - bt;
+        }
+        b.type = t;
+        b.b0 = b0 / a0;
+        b.b1 = b1 / a0;
+        b.b2 = b2 / a0;
+        b.a1 = a1 / a0;
+        b.a2 = a2 / a0;
+        if (keep && x1.size() == ch)
+        {
+            b.x1 = std::move(x1);
+            b.x2 = std::move(x2);
+            b.y1 = std::move(y1);
+            b.y2 = std::move(y2);
+        }
+        else
+            states(b, ch);
+    }
+    float run(B &b, uint32_t ch, float x)
+    {
+        float y = b.b0 * x + b.b1 * b.x1[ch] + b.b2 * b.x2[ch] - b.a1 * b.y1[ch] - b.a2 * b.y2[ch];
+        b.x2[ch] = b.x1[ch];
+        b.x1[ch] = x;
+        b.y2[ch] = b.y1[ch];
+        b.y1[ch] = y;
+        return y;
+    }
+    float clamp(float x) { return std::max(-1.f, std::min(1.f, x)); }
+    void validate(double f, double q, double g, uint32_t sr, Napi::Env e, const char *what)
+    {
+        if (!std::isfinite(f) || f <= 0 || f >= sr / 2.0 || !std::isfinite(q) || q <= 0 || !std::isfinite(g) || g < -24 || g > 24)
+            throw Napi::RangeError::New(e, std::string("invalid ") + what + " parameters");
+    }
+    float dynamics(Ctx *c, uint32_t ch, float x)
+    {
+        float ax = std::fabs(x), thr = std::pow(10.f, c->compDb / 20.f), env = c->compEnv[ch];
+        float target = 1;
+        if (c->compRatio > 1 && ax > thr)
+            target = std::pow(ax / thr, 1.f / c->compRatio - 1.f);
+        float a = std::exp(-1.f / (std::max(.1f, c->compAttack) * .001f * c->sr)), r = std::exp(-1.f / (std::max(.1f, c->compRelease) * .001f * c->sr));
+        env = target + (env - target) * (target < env ? a : r);
+        c->compEnv[ch] = env;
+        x *= env;
+        ax = std::fabs(x);
+        float lt = std::pow(10.f, c->limDb / 20.f), le = c->limEnv[ch];
+        float lg = ax > lt ? lt / std::max(ax, 1e-12f) : 1;
+        float lr = std::exp(-1.f / (std::max(.1f, c->limRelease) * .001f * c->sr));
+        le = lg < le ? lg : lg + (le - lg) * lr;
+        c->limEnv[ch] = le;
+        x *= le;
+        if (c->soft)
+        {
+            float d = std::max(.001f, c->drive);
+            x = std::tanh(x * d) / std::tanh(d);
+        }
+        return clamp(x);
+    }
+    void apply(Ctx *c, uint8_t *d, size_t fr)
+    {
+        float g = c->mute ? 0 : c->vol, l = g * (c->pan > 0 ? 1 - c->pan : 1), r = g * (c->pan < 0 ? 1 + c->pan : 1);
+        auto one = [&](uint32_t ch, float x)
+        {float q=c->ch>1?(ch==0?l:(ch==1?r:g)):g;x*=q;if(!c->graph.empty()){for(auto&n:c->graph)for(auto&b:n.bands)x=run(b,ch,x);}else{if(!c->biquad.type.empty())x=run(c->biquad,ch,x);for(auto&b:c->eq)x=run(b,ch,x);}return dynamics(c,ch,x); };
+        if (c->fmt == ma_format_s16)
+        {
+            auto *s = (int16_t *)d;
+            for (size_t f = 0; f < fr; f++)
+                for (uint32_t ch = 0; ch < c->ch; ch++)
+                    s[f * c->ch + ch] = (int16_t)std::lrintf(std::max(-32768.f, std::min(32767.f, one(ch, s[f * c->ch + ch] / 32768.f) * 32768.f)));
+        }
+        else
+        {
+            auto *s = (float *)d;
+            for (size_t f = 0; f < fr; f++)
+                for (uint32_t ch = 0; ch < c->ch; ch++)
+                    s[f * c->ch + ch] = one(ch, s[f * c->ch + ch]);
+        }
+    }
+    Napi::Value Process(const Napi::CallbackInfo &i)
+    {
+        auto e = i.Env();
+        auto *c = get(i);
+        if (i.Length() < 1 || !i[0].IsBuffer())
+            throw Napi::TypeError::New(e, "process() requires a Buffer");
+        auto in = i[0].As<Napi::Buffer<uint8_t>>();
+        size_t fb = (size_t)c->ch * c->bps;
+        if (in.Length() % fb)
+            throw Napi::RangeError::New(e, "input buffer is not aligned to complete audio frames");
+        size_t fr = in.Length() / fb;
+        auto out = Napi::Buffer<uint8_t>::New(e, in.Length());
+        if (!fr)
+            return out;
+        ma_uint64 a = fr, z = fr;
+        if (ma_data_converter_process_pcm_frames(&c->conv, in.Data(), &a, out.Data(), &z) != MA_SUCCESS || a != fr || z != fr)
+            throw Napi::Error::New(e, "miniaudio failed to process PCM frames");
+        apply(c, out.Data(), fr);
+        return out;
+    }
+    Napi::Value SetVolume(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        auto e = i.Env();
+        if (i.Length() < 1 || !i[0].IsNumber())
+            throw Napi::TypeError::New(e, "volume must be a number");
+        double v = i[0].As<Napi::Number>().DoubleValue();
+        if (!std::isfinite(v) || v < 0 || v > 4)
+            throw Napi::RangeError::New(e, "volume must be between 0 and 4");
+        c->vol = (float)v;
+        return e.Undefined();
+    }
+    Napi::Value SetMute(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        auto e = i.Env();
+        if (i.Length() < 1 || !i[0].IsBoolean())
+            throw Napi::TypeError::New(e, "muted must be boolean");
+        c->mute = i[0].As<Napi::Boolean>().Value();
+        return e.Undefined();
+    }
+    Napi::Value SetPan(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        auto e = i.Env();
+        if (i.Length() < 1 || !i[0].IsNumber())
+            throw Napi::TypeError::New(e, "pan must be a number");
+        double v = i[0].As<Napi::Number>().DoubleValue();
+        if (!std::isfinite(v) || v < -1 || v > 1)
+            throw Napi::RangeError::New(e, "pan must be between -1 and 1");
+        c->pan = (float)v;
+        return e.Undefined();
+    }
+    void parseB(const Napi::Object &o, Ctx *c, B &b, bool keep)
+    {
+        std::string t = o.Get("type").As<Napi::String>().Utf8Value();
+        double f = o.Get("frequency").As<Napi::Number>().DoubleValue(), q = o.Get("q").IsUndefined() ? DQ : o.Get("q").As<Napi::Number>().DoubleValue(), g = o.Get("gain").IsUndefined() ? 0 : o.Get("gain").As<Napi::Number>().DoubleValue();
+        validate(f, q, g, c->sr, o.Env(), "biquad");
+        coeff(b, c->sr, t, f, q, g, c->ch, keep);
+    }
+    Napi::Value SetBiquad(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        parseB(i[0].As<Napi::Object>(), c, c->biquad, false);
+        return i.Env().Undefined();
+    }
+    Napi::Value ClearBiquad(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        c->biquad = B{};
+        states(c->biquad, c->ch);
+        return i.Env().Undefined();
+    }
+    void parseEQ(const Napi::Array &a, Ctx *c, std::vector<B> &out, bool keep)
+    {
+        if (a.Length() > 16)
+            throw Napi::RangeError::New(a.Env(), "EQ supports at most 16 bands");
+        auto old = out;
+        out.clear();
+        for (uint32_t k = 0; k < a.Length(); k++)
+        {
+            auto o = a.Get(k).As<Napi::Object>();
+            std::string t = o.Get("type").As<Napi::String>().Utf8Value();
+            double f = o.Get("frequency").As<Napi::Number>().DoubleValue(), q = o.Get("q").IsUndefined() ? DQ : o.Get("q").As<Napi::Number>().DoubleValue(), g = o.Get("gain").As<Napi::Number>().DoubleValue();
+            validate(f, q, g, c->sr, a.Env(), "EQ band");
+            B b;
+            if (keep && k < old.size() && old[k].type == t)
+                b = old[k];
+            coeff(b, c->sr, t, f, q, g, c->ch, keep && k < old.size() && old[k].type == t);
+            out.push_back(std::move(b));
+        }
+    }
+    Napi::Value SetEQ(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        if (!i[0].IsArray())
+            throw Napi::TypeError::New(i.Env(), "setEQ() requires an array");
+        parseEQ(i[0].As<Napi::Array>(), c, c->eq, true);
+        return i.Env().Undefined();
+    }
+    Napi::Value ClearEQ(const Napi::CallbackInfo &i)
+    {
+        get(i)->eq.clear();
+        return i.Env().Undefined();
+    }
+    void ensure(Ctx *c, const std::string &id, Napi::Env e)
+    {
+        if (id.empty())
+            throw Napi::TypeError::New(e, "filter id must be a non-empty string");
+        for (auto &n : c->graph)
+            if (n.id == id)
+                throw Napi::Error::New(e, "filter id already exists");
+    }
+    Napi::Value AddB(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        std::string id = i[0].As<Napi::String>().Utf8Value();
+        ensure(c, id, i.Env());
+        N n;
+        n.id = id;
+        n.type = "biquad";
+        B b;
+        parseB(i[1].As<Napi::Object>(), c, b, false);
+        n.bands.push_back(std::move(b));
+        c->graph.push_back(std::move(n));
+        return i.Env().Undefined();
+    }
+    Napi::Value AddE(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        std::string id = i[0].As<Napi::String>().Utf8Value();
+        ensure(c, id, i.Env());
+        N n;
+        n.id = id;
+        n.type = "eq";
+        parseEQ(i[1].As<Napi::Array>(), c, n.bands, false);
+        c->graph.push_back(std::move(n));
+        return i.Env().Undefined();
+    }
+    Napi::Value Remove(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        std::string id = i[0].As<Napi::String>().Utf8Value();
+        auto it = std::find_if(c->graph.begin(), c->graph.end(), [&](auto &n)
+                               { return n.id == id; });
+        if (it == c->graph.end())
+            throw Napi::Error::New(i.Env(), "unknown filter id: " + id);
+        c->graph.erase(it);
+        return i.Env().Undefined();
+    }
+    Napi::Value Order(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        auto a = i[0].As<Napi::Array>();
+        if (a.Length() != c->graph.size())
+            throw Napi::RangeError::New(i.Env(), "filter order must contain every filter id exactly once");
+        std::vector<N> next;
+        for (uint32_t k = 0; k < a.Length(); k++)
+        {
+            std::string id = a.Get(k).As<Napi::String>().Utf8Value();
+            auto it = std::find_if(c->graph.begin(), c->graph.end(), [&](auto &n)
+                                   { return n.id == id; });
+            if (it == c->graph.end() || std::find_if(next.begin(), next.end(), [&](auto &n)
+                                                     { return n.id == id; }) != next.end())
+                throw Napi::RangeError::New(i.Env(), "filter order must contain every filter id exactly once");
+            next.push_back(*it);
+        }
+        c->graph.swap(next);
+        return i.Env().Undefined();
+    }
+    Napi::Value UpdateB(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        std::string id = i[0].As<Napi::String>().Utf8Value();
+        auto it = std::find_if(c->graph.begin(), c->graph.end(), [&](auto &n)
+                               { return n.id == id; });
+        if (it == c->graph.end() || it->type != "biquad")
+            throw Napi::Error::New(i.Env(), "unknown biquad filter id");
+        parseB(i[1].As<Napi::Object>(), c, it->bands[0], true);
+        return i.Env().Undefined();
+    }
+    Napi::Value UpdateE(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        std::string id = i[0].As<Napi::String>().Utf8Value();
+        auto it = std::find_if(c->graph.begin(), c->graph.end(), [&](auto &n)
+                               { return n.id == id; });
+        if (it == c->graph.end() || it->type != "eq")
+            throw Napi::Error::New(i.Env(), "unknown EQ filter id");
+        parseEQ(i[1].As<Napi::Array>(), c, it->bands, true);
+        return i.Env().Undefined();
+    }
+    Napi::Value Lim(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        auto o = i[0].As<Napi::Object>();
+        double t = o.Get("threshold").IsUndefined() ? -1 : o.Get("threshold").As<Napi::Number>().DoubleValue(), r = o.Get("release").IsUndefined() ? 50 : o.Get("release").As<Napi::Number>().DoubleValue();
+        if (!std::isfinite(t) || t > 0 || t < -24 || !std::isfinite(r) || r <= 0)
+            throw Napi::RangeError::New(i.Env(), "invalid limiter parameters");
+        c->limDb = (float)t;
+        c->limRelease = (float)r;
+        return i.Env().Undefined();
+    }
+    Napi::Value Comp(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        auto o = i[0].As<Napi::Object>();
+        double t = o.Get("threshold").IsUndefined() ? -12 : o.Get("threshold").As<Napi::Number>().DoubleValue(), ratio = o.Get("ratio").IsUndefined() ? 4 : o.Get("ratio").As<Napi::Number>().DoubleValue(), a = o.Get("attack").IsUndefined() ? 10 : o.Get("attack").As<Napi::Number>().DoubleValue(), r = o.Get("release").IsUndefined() ? 100 : o.Get("release").As<Napi::Number>().DoubleValue();
+        if (!std::isfinite(t) || t > 0 || t < -60 || !std::isfinite(r) || r <= 0 || !std::isfinite(a) || a <= 0 || !std::isfinite(ratio) || ratio < 1)
+            throw Napi::RangeError::New(i.Env(), "invalid compressor parameters");
+        c->compDb = (float)t;
+        c->compRatio = (float)ratio;
+        c->compAttack = (float)a;
+        c->compRelease = (float)r;
+        return i.Env().Undefined();
+    }
+    Napi::Value Soft(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        auto o = i[0].As<Napi::Object>();
+        bool en = o.Get("enabled").IsUndefined() ? false : o.Get("enabled").As<Napi::Boolean>().Value();
+        double d = o.Get("drive").IsUndefined() ? 2 : o.Get("drive").As<Napi::Number>().DoubleValue();
+        if (!std::isfinite(d) || d <= 0)
+            throw Napi::RangeError::New(i.Env(), "invalid soft clip parameters");
+        c->soft = en;
+        c->drive = (float)d;
+        return i.Env().Undefined();
+    }
+    Napi::Value ClearLimiter(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        c->limDb = 0;
+        c->limRelease = 50;
+        std::fill(c->limEnv.begin(), c->limEnv.end(), 1.f);
+        return i.Env().Undefined();
+    }
+    Napi::Value ClearCompressor(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        c->compDb = 0;
+        c->compRatio = 1;
+        c->compAttack = 10;
+        c->compRelease = 100;
+        std::fill(c->compEnv.begin(), c->compEnv.end(), 1.f);
+        return i.Env().Undefined();
+    }
+    void resetProcessingState(Ctx *c)
+    {
+        states(c->biquad, c->ch);
+        for (auto &b : c->eq)
+            states(b, c->ch);
+        for (auto &n : c->graph)
+            for (auto &b : n.bands)
+                states(b, c->ch);
+        std::fill(c->limEnv.begin(), c->limEnv.end(), 1.f);
+        std::fill(c->compEnv.begin(), c->compEnv.end(), 1.f);
+    }
+    Napi::Value ResetState(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        resetProcessingState(c);
+        return i.Env().Undefined();
+    }
+    Napi::Value Reset(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        c->vol = 1;
+        c->pan = 0;
+        c->mute = false;
+        c->biquad = B{};
+        states(c->biquad, c->ch);
+        c->eq.clear();
+        c->graph.clear();
+        c->limDb = 0;
+        c->limRelease = 50;
+        c->compDb = 0;
+        c->compRatio = 1;
+        c->compAttack = 10;
+        c->compRelease = 100;
+        c->soft = false;
+        c->drive = 2;
+        std::fill(c->limEnv.begin(), c->limEnv.end(), 1.f);
+        std::fill(c->compEnv.begin(), c->compEnv.end(), 1.f);
+        return i.Env().Undefined();
+    }
+    Napi::Value Destroy(const Napi::CallbackInfo &i)
+    {
+        auto *c = get(i);
+        if (c->init)
+            ma_data_converter_uninit(&c->conv, nullptr);
+        c->dead = true;
+        delete c;
+        return i.Env().Undefined();
+    }
+    Napi::Object Create(const Napi::CallbackInfo &i)
+    {
+        Napi::Env e = i.Env();
+        Napi::Object o = i[0].As<Napi::Object>();
+        auto *c = new Ctx;
+        c->sr = o.Get("sampleRate").As<Napi::Number>().Uint32Value();
+        c->ch = o.Get("channels").As<Napi::Number>().Uint32Value();
+        std::string f = o.Get("format").As<Napi::String>().Utf8Value();
+        c->fmt = f == "s16" ? ma_format_s16 : ma_format_f32;
+        c->bps = c->fmt == ma_format_s16 ? 2 : 4;
+        c->limEnv.assign(c->ch, 1);
+        c->compEnv.assign(c->ch, 1);
+        states(c->biquad, c->ch);
+        init(c);
+        o.Set("_context", Napi::External<Ctx>::New(e, c));
+        o.Set("process", Napi::Function::New(e, Process));
+        o.Set("setVolume", Napi::Function::New(e, SetVolume));
+        o.Set("setMute", Napi::Function::New(e, SetMute));
+        o.Set("setPan", Napi::Function::New(e, SetPan));
+        o.Set("setBiquad", Napi::Function::New(e, SetBiquad));
+        o.Set("clearBiquad", Napi::Function::New(e, ClearBiquad));
+        o.Set("setEQ", Napi::Function::New(e, SetEQ));
+        o.Set("clearEQ", Napi::Function::New(e, ClearEQ));
+        o.Set("addBiquad", Napi::Function::New(e, AddB));
+        o.Set("addEQ", Napi::Function::New(e, AddE));
+        o.Set("removeFilter", Napi::Function::New(e, Remove));
+        o.Set("setFilterOrder", Napi::Function::New(e, Order));
+        o.Set("updateBiquad", Napi::Function::New(e, UpdateB));
+        o.Set("updateEQ", Napi::Function::New(e, UpdateE));
+        o.Set("setLimiter", Napi::Function::New(e, Lim));
+        o.Set("clearLimiter", Napi::Function::New(e, ClearLimiter));
+        o.Set("setCompressor", Napi::Function::New(e, Comp));
+        o.Set("clearCompressor", Napi::Function::New(e, ClearCompressor));
+        o.Set("setSoftClip", Napi::Function::New(e, Soft));
+        o.Set("resetState", Napi::Function::New(e, ResetState));
+        o.Set("reset", Napi::Function::New(e, Reset));
+        o.Set("destroy", Napi::Function::New(e, Destroy));
+        return o;
+    }
+    Napi::Value Version(const Napi::CallbackInfo &i) { return Napi::String::New(i.Env(), "0.8.0-phase7-dynamics"); }
 }
-Napi::Object Init(Napi::Env e,Napi::Object o){auto create=Napi::Function::New(e,Create);o.Set("create",create);o.Set("createDSP",create);o.Set("version",Napi::Function::New(e,Version));return o;}
-NODE_API_MODULE(audio_dsp,Init)
+Napi::Object Init(Napi::Env e, Napi::Object o)
+{
+    auto create = Napi::Function::New(e, Create);
+    o.Set("create", create);
+    o.Set("createDSP", create);
+    o.Set("version", Napi::Function::New(e, Version));
+    return o;
+}
+NODE_API_MODULE(audio_dsp, Init)
