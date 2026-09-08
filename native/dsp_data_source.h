@@ -2,6 +2,7 @@
 
 #include "miniaudio.h"
 #include <cstddef>
+#include <vector>
 
 namespace audio_dsp {
 
@@ -18,6 +19,7 @@ struct DSPDataSource {
     ma_uint32 channels = 0;
     ma_uint32 bytesPerFrame = 0;
     ma_uint64 cursor = 0;
+    std::vector<ma_uint8> scratch;
 };
 
 ma_result dsp_data_source_init(
