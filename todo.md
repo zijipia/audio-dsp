@@ -9,7 +9,7 @@
 - [x] Biquad/EQ/filter graph APIs are present on `main`.
 - [x] Compressor/limiter/soft-clip processing is present on `main`.
 - [x] Seek-aware DSP state reset.
-- [ ] miniaudio `ma_data_source` DSP adapter.
+- [~] miniaudio `ma_data_source` DSP adapter — implementation added; validation tests still pending.
 - [ ] ZiPlayer `FilterController` migration away from FFmpeg.
 - [ ] Native-vs-FFmpeg seek/filter-change benchmark.
 - [ ] Optional DSP preroll after basic seek is proven.
@@ -27,18 +27,27 @@
 
 ## Phase 4 — miniaudio DSP data source
 
-- [ ] Add `native/dsp_data_source.h`.
-- [ ] Add `native/dsp_data_source.cc`.
-- [ ] Implement `read()` over an upstream `ma_data_source` followed by DSP processing.
-- [ ] Implement `seek()` using `ma_data_source_seek_to_pcm_frame()` on the upstream source.
-- [ ] Reset DSP temporal state only after a successful upstream seek.
-- [ ] Implement `get_data_format()`.
-- [ ] Implement `get_cursor()`.
-- [ ] Implement `get_length()`.
-- [ ] Define ownership/lifetime rules for upstream source and DSP context.
+- [x] Add `native/dsp_data_source.h`.
+- [x] Add `native/dsp_data_source.cc`.
+- [x] Implement `read()` over an upstream `ma_data_source` followed by DSP processing.
+- [x] Implement `seek()` using `ma_data_source_seek_to_pcm_frame()` on the upstream source.
+- [x] Reset DSP temporal state only after a successful upstream seek.
+- [x] Implement `get_data_format()`.
+- [x] Implement `get_cursor()`.
+- [x] Implement `get_length()`.
+- [x] Define ownership/lifetime rules: adapter borrows upstream and DSP; caller owns both and must keep them alive until adapter uninit.
 - [ ] Add cursor/EOF/seek failure tests.
 - [ ] Add concurrent read/seek safety rules/tests where applicable.
-- [ ] Add the new native source to `binding.gyp` only when its API is ready.
+- [x] Add the new native source to `binding.gyp`.
+
+### Phase 4 design rules
+
+- The adapter does not own or destroy the upstream `ma_data_source`.
+- The adapter does not own or destroy the DSP context.
+- A successful absolute seek updates the adapter cursor and then clears DSP temporal state.
+- A failed upstream seek leaves DSP state untouched.
+- `read(..., nullptr, ...)` is forwarded as miniaudio's forward-seek/read-discard operation and resets DSP state after frames are skipped.
+- Read and seek must be serialized by the caller; the adapter does not add a lock. This matches the intended decoder/source ownership model and avoids adding a lock to the hot read path.
 
 ## Phase 5 — ZiPlayer integration
 
@@ -76,3 +85,8 @@
 - `fix: correct native filter-order environment` — `8784a3ed978b40fc514f37f77a8a0fbee573671f`
 - `api: expose DSP resetState` — `6e24606bdd1063513cd89b0937b65a5554a0c2ae`
 - `test: fix full reset expectation` — `608d9dd58968ccf17dcf645d0e4b7722de0c257f`
+- `core: add miniaudio DSP data source adapter` — `248a54a9f3865b08f114a5cdabf930cdde989361`
+- `core: implement miniaudio DSP data source adapter` — `b4e3f95c656608f327c0f2a892d041ed5c10ea99`
+- `fix: initialize DSP data source through miniaudio base API` — `62c07275d2209ee5a74baefe36309b37ae5c304b`
+- `fix: match miniaudio data source vtable` — `228e2230a61610baa62c232bb24f60383b854cd0`
+- `build: compile DSP data source adapter` — `64ca1041712f1e36c9eaff718e5a9830d1137a57`
