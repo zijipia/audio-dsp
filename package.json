@@ -33,7 +33,7 @@
     "benchmark": "node benchmark/smoke.js"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.20.1",
     "node-addon-api": "^8.5.0",
     "typescript": "^5.9.0"
   },
