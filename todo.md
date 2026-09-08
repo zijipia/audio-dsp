@@ -10,7 +10,7 @@
 - [x] Compressor/limiter/soft-clip processing is present on `main`.
 - [x] Seek-aware DSP state reset.
 - [~] miniaudio `ma_data_source` DSP adapter — implementation added; validation tests still pending.
-- [~] ZiPlayer `FilterController` native PCM path — integrated for raw s16le sources; encoded-source decoder migration remains.
+- [~] ZiPlayer `FilterController` native path — raw PCM plus miniaudio-supported encoded sources now route through native decode/DSP; unsupported encoded sources retain FFmpeg compatibility fallback.
 - [ ] Native-vs-FFmpeg seek/filter-change benchmark.
 - [ ] Optional DSP preroll after basic seek is proven.
 
@@ -58,9 +58,12 @@
 - [x] Reuse one DSP instance across runtime filter changes on the native PCM path.
 - [x] Route native raw-PCM seek to the resolver/source first, then initialize/reset DSP state.
 - [x] Keep Opus encoding separate from the DSP layer; raw PCM is handed to the Discord voice pipeline.
-- [~] Remove FFmpeg process recreation from filter/seek operations — complete for native raw PCM, retained as compatibility fallback for encoded/unsupported sources.
+- [~] Remove FFmpeg process recreation from filter/seek operations — complete for native raw PCM and miniaudio-supported encoded sources; retained as compatibility fallback for unsupported sources.
 - [ ] Add integration tests for filter changes and repeated seeks.
-- [ ] Add native decoder/data-source integration for encoded webm/ogg/mp3 sources.
+- [x] Add native miniaudio decoder binding with PCM read/seek/cursor/length operations.
+- [x] Route WAV/MP3/FLAC/OGG-family sources into native decoder → PCM → native DSP when the source can be identified as supported.
+- [~] Encoded native source currently buffers the encoded input before constructing `ma_decoder`; callback-backed `ma_data_source` input remains a follow-up optimization.
+- [ ] Add native decoder/data-source integration for encoded WebM/Opus sources; miniaudio's generic decoder path is not being assumed to support every FFmpeg codec/container.
 
 ## Phase 6 — performance
 
@@ -94,3 +97,9 @@
 - `build: compile DSP data source adapter` — `64ca1041712f1e36c9eaff718e5a9830d1137a57`
 - `fix: make DSP data source seek/skip stateful and reusable` — `fc29056f34b214cf382fc0cde87e81c8d2f48115`
 - `fix: make DSP data source seek/skip stateful and reusable` — `9be37f40e04ffcec411532955070e3b9ae8404f`
+- `feat: add miniaudio native decoder binding` — `8f4c4369422042138a100027b991fac9116fbfa9`
+- `fix: register native decoder addon` — `18d33c425b4139ccf9fc961f18f8624f88d9baa5`
+- `build: add miniaudio decoder addon target` — `7ae7bdf8d50b45d21fa55351b673fcb19d6dd273`
+- `api: expose native miniaudio decoder` — `76d4087c7adfe14f979d5d76655aee81ce6ef367`
+- `fix: preserve EQ update parameter` — `898523ec5549b9b70cba2fdf7b55b445c001f100`
+- `build: package native decoder addon` — `63d3bb79b88837c87ee540277b630825a4b6802b`
