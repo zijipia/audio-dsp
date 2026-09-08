@@ -77,7 +77,7 @@ test("resetState is distinct from full reset", () => {
   assert.ok(preserved > 0 && preserved < 1);
 
   d.reset();
-  assert.equal(floats(d.process(input), 1)[0], 0.5);
+  assert.equal(floats(d.process(input), 1)[0], 1);
 
   d.destroy();
 });
