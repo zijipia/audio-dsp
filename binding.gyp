@@ -4,6 +4,7 @@
       "target_name": "audio_dsp",
       "sources": [
         "native/audio_dsp.cc",
+        "native/dsp_data_source.cc",
         "native/miniaudio_impl.cc"
       ],
       "include_dirs": [
