@@ -6,11 +6,39 @@
   "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "require": "./dist/index.js" } },
-  "files": ["dist", "build/Release/audio_dsp.node", "build/Release/audio_decoder.node", "native", "third_party/miniaudio", "README.md", "LICENSE"],
-  "engines": { "node": ">=22" },
-  "scripts": { "build": "npm run build:native && npm run build:ts", "build:native": "node-gyp rebuild", "build:ts": "tsc -p tsconfig.json", "clean": "node-gyp clean && rm -rf dist", "test": "npm run build && node --test test/*.test.js", "benchmark": "node benchmark/smoke.js" },
-  "devDependencies": { "@types/node": "^22.0.0", "node-addon-api": "^8.5.0", "typescript": "^5.9.0" },
-  "dependencies": { "node-gyp": "^11.4.0" },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "build/Release/audio_dsp.node",
+    "build/Release/audio_decoder.node",
+    "native",
+    "third_party/miniaudio",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build:native && npm run build:ts",
+    "build:native": "node-gyp rebuild",
+    "build:ts": "tsc -p tsconfig.json",
+    "clean": "node-gyp clean && rm -rf dist",
+    "test": "npm run build && node --test test/*.test.js",
+    "benchmark": "node benchmark/smoke.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "node-addon-api": "^8.5.0",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "node-gyp": "^13.0.2"
+  },
   "packageManager": "npm@11"
 }
