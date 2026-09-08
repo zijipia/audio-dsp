@@ -19,12 +19,26 @@ public:
         return exports;
     }
     Decoder(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Decoder>(info) {
-        if (info.Length() < 1 || !info[0].IsBuffer()) throw Napi::TypeError::New(info.Env(), "NativeDecoder requires an encoded Buffer");
-        input_ = Napi::Persistent(info[0].As<Napi::Buffer<uint8_t>>());
+        auto env = info.Env();
+        if (info.Length() < 1 || (!info[0].IsBuffer() && !info[0].IsString()))
+            throw Napi::TypeError::New(env, "NativeDecoder requires an encoded Buffer or file path");
         ma_decoder_config config = ma_decoder_config_init(ma_format_s16, 2, 48000);
-        if (ma_decoder_init_memory(input_.Data(), input_.Length(), &config, &decoder_) != MA_SUCCESS) {
+        ma_result result = MA_ERROR;
+        if (info[0].IsBuffer()) {
+            input_ = Napi::Persistent(info[0].As<Napi::Buffer<uint8_t>>());
+            if (input_.Length() == 0) {
+                input_.Reset();
+                throw Napi::RangeError::New(env, "encoded Buffer must not be empty");
+            }
+            result = ma_decoder_init_memory(input_.Data(), input_.Length(), &config, &decoder_);
+        } else {
+            const auto path = info[0].As<Napi::String>().Utf8Value();
+            if (path.empty()) throw Napi::RangeError::New(env, "file path must not be empty");
+            result = ma_decoder_init_file(path.c_str(), &config, &decoder_);
+        }
+        if (result != MA_SUCCESS) {
             input_.Reset();
-            throw Napi::Error::New(info.Env(), "miniaudio could not decode this audio format");
+            throw Napi::Error::New(env, "miniaudio could not decode this audio source");
         }
         initialized_ = true;
     }
