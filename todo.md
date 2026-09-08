@@ -10,7 +10,7 @@
 - [x] Compressor/limiter/soft-clip processing is present on `main`.
 - [x] Seek-aware DSP state reset.
 - [~] miniaudio `ma_data_source` DSP adapter — implementation added; validation tests still pending.
-- [ ] ZiPlayer `FilterController` migration away from FFmpeg.
+- [~] ZiPlayer `FilterController` native PCM path — integrated for raw s16le sources; encoded-source decoder migration remains.
 - [ ] Native-vs-FFmpeg seek/filter-change benchmark.
 - [ ] Optional DSP preroll after basic seek is proven.
 
@@ -35,6 +35,8 @@
 - [x] Implement `get_data_format()`.
 - [x] Implement `get_cursor()`.
 - [x] Implement `get_length()`.
+- [x] Forward `set_looping()` to the upstream source.
+- [x] Reuse a persistent scratch buffer for read/forward-discard operations.
 - [x] Define ownership/lifetime rules: adapter borrows upstream and DSP; caller owns both and must keep them alive until adapter uninit.
 - [ ] Add cursor/EOF/seek failure tests.
 - [ ] Add concurrent read/seek safety rules/tests where applicable.
@@ -46,19 +48,19 @@
 - The adapter does not own or destroy the DSP context.
 - A successful absolute seek updates the adapter cursor and then clears DSP temporal state.
 - A failed upstream seek leaves DSP state untouched.
-- `read(..., nullptr, ...)` is forwarded as miniaudio's forward-seek/read-discard operation and resets DSP state after frames are skipped.
+- `read(..., nullptr, ...)` is implemented as a forward-discard through the DSP so temporal state advances consistently with the skipped audio; it does not reset state.
 - Read and seek must be serialized by the caller; the adapter does not add a lock. This matches the intended decoder/source ownership model and avoids adding a lock to the hot read path.
 
 ## Phase 5 — ZiPlayer integration
 
-- [ ] Map structured filter configuration to native DSP setters.
-- [ ] Remove FFmpeg filter-string generation from the native DSP path.
-- [ ] Reuse one DSP instance across runtime filter changes.
-- [ ] Route seek to the decoder/source first, then reset DSP temporal state.
-- [ ] Ensure filter change + seek preserves configuration and resets temporal state once.
-- [ ] Keep Opus encoding separate from the DSP layer.
-- [ ] Remove FFmpeg process recreation from filter/seek operations.
+- [~] Map the currently supported structured filter set to native DSP setters for raw s16le PCM.
+- [x] Remove FFmpeg filter-string generation from the native DSP path.
+- [x] Reuse one DSP instance across runtime filter changes on the native PCM path.
+- [x] Route native raw-PCM seek to the resolver/source first, then initialize/reset DSP state.
+- [x] Keep Opus encoding separate from the DSP layer; raw PCM is handed to the Discord voice pipeline.
+- [~] Remove FFmpeg process recreation from filter/seek operations — complete for native raw PCM, retained as compatibility fallback for encoded/unsupported sources.
 - [ ] Add integration tests for filter changes and repeated seeks.
+- [ ] Add native decoder/data-source integration for encoded webm/ogg/mp3 sources.
 
 ## Phase 6 — performance
 
@@ -90,3 +92,5 @@
 - `fix: initialize DSP data source through miniaudio base API` — `62c07275d2209ee5a74baefe36309b37ae5c304b`
 - `fix: match miniaudio data source vtable` — `228e2230a61610baa62c232bb24f60383b854cd0`
 - `build: compile DSP data source adapter` — `64ca1041712f1e36c9eaff718e5a9830d1137a57`
+- `fix: make DSP data source seek/skip stateful and reusable` — `fc29056f34b214cf382fc0cde87e81c8d2f48115`
+- `fix: make DSP data source seek/skip stateful and reusable` — `9be37f40e04ffcec411532955070e3b9ae8404f`
